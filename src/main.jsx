@@ -1,10 +1,15 @@
-import React from 'react'
-import { createRoot } from 'react-dom/client'
-import App from './App.jsx'
+// src/main.jsx
+import React from "react";
+import { createRoot } from "react-dom/client";
+import App from "./App";
 
-const root = createRoot(document.getElementById('root'))
-root.render(<App />)
-// Registrar el Service Worker para que la app sea instalable y funcione offline
+createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+// 👇 REGISTRO DEL SERVICE WORKER (necesario para instalación/offline)
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js");
