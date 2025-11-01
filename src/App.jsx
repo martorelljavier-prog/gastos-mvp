@@ -107,6 +107,28 @@ export default function App() {
   const [userId, setUserId] = useState(null);
   const [lastSync, setLastSync] = useState(null);
 
+  // Captura el magic link (#access_token=#...&refresh_token=...) y crea la sesión
+  useEffect(() => {
+    try {
+      const hash = window?.location?.hash || "";
+      if (hash.includes("access_token")) {
+        const params = new URLSearchParams(hash.replace(/^#/, ""));
+        const access_token = params.get("access_token");
+        const refresh_token = params.get("refresh_token");
+        if (access_token && refresh_token) {
+          sb.auth.setSession({ access_token, refresh_token }).then(({ data, error }) => {
+            if (!error && data?.session?.user?.id) {
+              setUserId(data.session.user.id);
+              // Limpio el hash de la URL para que no quede visible
+              const { origin, pathname, search } = window.location;
+              window.history.replaceState({}, document.title, origin + pathname + search);
+            }
+          });
+        }
+      }
+    } catch {}
+  }, []);
+
   useEffect(() => {
     getSession().then((s) => setUserId(s?.user?.id || null));
     const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
