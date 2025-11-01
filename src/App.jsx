@@ -55,6 +55,13 @@ async function pushRemote(userId, payload) {
   if (error) alert("Push error: " + error.message);
 }
 
+// === Registrar Service Worker (PWA) ===
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js");
+  });
+}
+
 export default function App() {
   // Estado base
   const [db, setDb] = useLocalState({
