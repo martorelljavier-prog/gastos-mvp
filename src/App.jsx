@@ -62,6 +62,20 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+function InstallPromptButton(){
+  const [canInstall, setCanInstall] = React.useState(false);
+  const deferredRef = React.useRef(null);
+  React.useEffect(()=>{
+    const h = (e)=>{ e.preventDefault(); deferredRef.current = e; setCanInstall(true); };
+    window.addEventListener("beforeinstallprompt", h);
+    return ()=> window.removeEventListener("beforeinstallprompt", h);
+  },[]);
+  if(!canInstall) return null;
+  return (
+    <button onClick={()=>deferredRef.current?.prompt()} className="mt-4 px-3 py-2 rounded-xl bg-white border">Instalar app</button>
+  );
+}
+
 export default function App() {
   // Estado base
   const [db, setDb] = useLocalState({
@@ -461,31 +475,7 @@ export default function App() {
         {/* Footer */}
         <footer className="text-xs text-slate-500 text-center py-6">
           Hecho con React.
-
-          {/* --- FORZAR BOTON INSTALAR EN CHROME --- */}
-          {(() => {
-            const [canInstall, setCanInstall] = React.useState(false);
-            const deferredRef = React.useRef(null);
-            React.useEffect(() => {
-              const h = (e) => {
-                e.preventDefault();
-                deferredRef.current = e;
-                setCanInstall(true);
-              };
-              window.addEventListener("beforeinstallprompt", h);
-              return () => window.removeEventListener("beforeinstallprompt", h);
-            }, []);
-            return canInstall ? (
-              <button
-                onClick={() => {
-                  deferredRef.current?.prompt();
-                }}
-                className="mt-4 px-3 py-2 rounded-xl bg-white border"
-              >Instalar app</button>
-            ) : null;
-          })()}
-
-        </footer> Próximo paso: publicar (Vercel) y PWA (icono + offline).
+          <InstallPromptButton />
         </footer>
       </div>
     </div>
