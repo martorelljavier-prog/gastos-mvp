@@ -2,15 +2,18 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend } from "recharts";
 import { createClient } from "@supabase/supabase-js";
 
-// Claves públicas de Supabase (provistas por Javier)
+// --- Gastos — MVP (React) ---
+// Offline-first (localStorage) + Sync manual en Supabase. Gráficos por categoría y por día.
+
 const SUPABASE_URL = "https://qugnkfjbfqcihummbaal.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
 
+// Helpers
 const LS_KEY = "gastos_mvp_v1";
 const fmt = (n) => new Intl.NumberFormat(undefined, { style: "currency", currency: "ARS", maximumFractionDigits: 2 }).format(Number(n || 0));
 const todayISO = () => new Date().toISOString().slice(0, 10);
-const toMonthKey = (d) => (d || todayISO()).slice(0, 7);
+const toMonthKey = (d) => (d || todayISO()).slice(0, 7); // YYYY-MM
 
 function useLocalState(defaultValue) {
   const [state, setState] = useState(() => {
@@ -25,10 +28,12 @@ function useLocalState(defaultValue) {
   return [state, setState];
 }
 
+// ---- Supabase helpers (snapshot por usuario)
 async function signInWithMagic(email) {
   if (!email) return alert("Ingresá un email válido");
-  const { error } = await sb.auth.signInWithOtp({ email });
-  if (error) alert(error.message); else alert("Revisá tu email y abrí el link para iniciar sesión.");
+  const redirectTo = window?.location?.origin || "https://example.com"; // vuelve a esta misma app
+  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+  if (error) alert(error.message); else alert("Revisá tu email para iniciar sesión");
 }
 
 async function getSession() {
@@ -38,7 +43,7 @@ async function getSession() {
 
 async function pullRemote(userId) {
   const { data, error } = await sb.from("gastos_snapshots").select("payload").eq("user_id", userId).single();
-  if (error && error.code !== 'PGRST116') {
+  if (error && error.code !== "PGRST116") { // not found está ok
     alert("Pull error: " + error.message);
     return null;
   }
@@ -51,6 +56,7 @@ async function pushRemote(userId, payload) {
 }
 
 export default function App() {
+  // Estado base
   const [db, setDb] = useLocalState({
     currency: "ARS",
     categories: [
@@ -88,7 +94,7 @@ export default function App() {
       { id: "transporte", name: "Transporte" },
       { id: "vacaciones", name: "Vacaciones" },
     ],
-    expenses: [],
+    expenses: [], // {id, date, amount, categoryId, note}
   });
 
   const [filters, setFilters] = useState({ month: toMonthKey(todayISO()), categoryId: "all", q: "" });
@@ -96,6 +102,7 @@ export default function App() {
   const amountRef = useRef(null);
   useEffect(() => { amountRef.current?.focus(); }, []);
 
+  // Auth & sync state
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState(null);
   const [lastSync, setLastSync] = useState(null);
@@ -108,15 +115,21 @@ export default function App() {
     return () => sub.subscription?.unsubscribe?.();
   }, []);
 
-  const categoriesById = useMemo(() => Object.fromEntries(db.categories.map(c => [c.id, c])), [db.categories]);
+  // Derivados
+  const categoriesById = useMemo(
+    () => Object.fromEntries(db.categories.map(c => [c.id, c])),
+    [db.categories]
+  );
 
   const expensesFiltered = useMemo(() => {
-    return db.expenses.filter(e => {
-      const inMonth = toMonthKey(e.date) === filters.month;
-      const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
-      const inQ = !filters.q || (e.note?.toLowerCase().includes(filters.q.toLowerCase()));
-      return inMonth && inCat && inQ;
-    }).sort((a, b) => (a.date < b.date ? 1 : -1));
+    return db.expenses
+      .filter(e => {
+        const inMonth = toMonthKey(e.date) === filters.month;
+        const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
+        const inQ = !filters.q || (e.note?.toLowerCase().includes(filters.q.toLowerCase()));
+        return inMonth && inCat && inQ;
+      })
+      .sort((a, b) => (a.date < b.date ? 1 : -1));
   }, [db.expenses, filters]);
 
   const totals = useMemo(() => {
@@ -148,6 +161,7 @@ export default function App() {
     return base;
   }, [db.expenses, filters.month]);
 
+  // Acciones
   function addExpense(ev) {
     ev.preventDefault();
     const amt = Number(String(form.amount).replace(",", "."));
@@ -180,6 +194,41 @@ export default function App() {
     setDb(prev => ({ ...prev, categories: prev.categories.map(c => c.id === catId ? { ...c, name } : c) }));
   }
 
+  function exportJSON() {
+    const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `gastos_${filters.month}.json`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportCSV() {
+    const header = ["id", "date", "amount", "category", "note"]; 
+    const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\n"," ")]);
+    const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `gastos_${filters.month}.csv`; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function importJSON(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        if (!parsed?.expenses || !parsed?.categories) throw new Error("Formato inválido");
+        setDb(parsed);
+        alert("Datos importados");
+      } catch (e) {
+        alert("No pude importar el archivo. Revisa el formato JSON.");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // --- Sync manual (fuera de useEffect)
   async function doPull() {
     if (!userId) return alert("Iniciá sesión para sincronizar");
     const remote = await pullRemote(userId);
@@ -190,7 +239,6 @@ export default function App() {
       alert("No hay datos remotos aún");
     }
   }
-
   async function doPush() {
     if (!userId) return alert("Iniciá sesión para sincronizar");
     await pushRemote(userId, db);
@@ -206,43 +254,16 @@ export default function App() {
             <p className="text-sm text-slate-600">Offline • Export/Import • Sync manual • Moneda: {db.currency}</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={() => {
-              const header = ["id","date","amount","category","note"];
-              const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\n"," ")]);
-              const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
-              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url; a.download = `gastos_${filters.month}.csv`; a.click();
-              URL.revokeObjectURL(url);
-            }} className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md">Exportar CSV</button>
-            <button onClick={() => {
-              const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement("a");
-              a.href = url; a.download = `gastos_${filters.month}.json`; a.click();
-              URL.revokeObjectURL(url);
-            }} className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md">Exportar JSON</button>
+            <button onClick={exportCSV} className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md">Exportar CSV</button>
+            <button onClick={exportJSON} className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md">Exportar JSON</button>
             <label className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md cursor-pointer">
               Importar JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=>e.target.files?.[0] && (function(file){
-                const reader = new FileReader();
-                reader.onload = () => {
-                  try {
-                    const parsed = JSON.parse(String(reader.result));
-                    if (!parsed?.expenses || !parsed?.categories) throw new Error("Formato inválido");
-                    setDb(parsed);
-                    alert("Datos importados");
-                  } catch (e) {
-                    alert("No pude importar el archivo. Revisa el formato JSON.");
-                  }
-                };
-                reader.readAsText(file);
-              })(e.target.files[0])} />
+              <input type="file" accept="application/json" className="hidden" onChange={(e)=>e.target.files?.[0] && importJSON(e.target.files[0])} />
             </label>
           </div>
         </header>
 
+        {/* Auth & Sync */}
         <section className="bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div className="flex items-center gap-2">
             {userId ? (
@@ -264,6 +285,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* Filtros */}
         <section className="bg-white rounded-2xl shadow p-4 grid gap-3 md:grid-cols-4">
           <div className="flex flex-col">
             <label className="text-sm">Mes</label>
@@ -282,6 +304,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* Totales rápidos */}
         <section className="bg-white rounded-2xl shadow p-4 grid grid-cols-2 md:grid-cols-4 gap-4">
           <div className="p-3 rounded-xl border text-center">
             <div className="text-xs text-slate-500">Total del mes</div>
@@ -295,6 +318,7 @@ export default function App() {
           ))}
         </section>
 
+        {/* Gráficos */}
         <section className="bg-white rounded-2xl shadow p-4 grid md:grid-cols-2 gap-6">
           <div className="h-72">
             <h3 className="font-semibold mb-2">Gasto por categoría ({filters.month})</h3>
@@ -324,6 +348,7 @@ export default function App() {
           </div>
         </section>
 
+        {/* Alta de gasto */}
         <section className="bg-white rounded-2xl shadow p-4">
           <form onSubmit={addExpense} className="grid md:grid-cols-5 gap-3 items-end">
             <div className="flex flex-col">
@@ -354,6 +379,7 @@ export default function App() {
           </form>
         </section>
 
+        {/* Lista de gastos */}
         <section className="bg-white rounded-2xl shadow overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-slate-100">
@@ -384,6 +410,7 @@ export default function App() {
           </table>
         </section>
 
+        {/* Categorías */}
         <section className="bg-white rounded-2xl shadow p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold">Categorías</h2>
@@ -402,6 +429,7 @@ export default function App() {
           <p className="text-xs text-slate-500 mt-2">Consejo: mantené pocas categorías y usá la nota para el detalle.</p>
         </section>
 
+        {/* Footer */}
         <footer className="text-xs text-slate-500 text-center py-6">
           Hecho con React. Próximo paso: publicar (Vercel) y PWA (icono + offline).
         </footer>
