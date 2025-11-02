@@ -38,41 +38,13 @@ function useLocalState(defaultValue) {
 }
 
 // ---- Supabase helpers (snapshot por usuario)
-async function sendCode() {
-  if (!email) return alert("Ingresá un email válido");
-  try {
-    const { error } = await sb.auth.signInWithOtp({
-      email,
-      options: {
-        shouldCreateUser: true,   // crea usuario si no existe
-        // clave: NO usar emailRedirectTo para evitar abrir Safari
-      },
-    });
-    if (error) throw error;
-    setStep("code");
-    alert("Te enviamos un código de 6 dígitos a tu e-mail. Copialo y pegalo aquí.");
-  } catch (e) {
-    alert(e?.message ?? "No pudimos enviar el código");
-  }
-}
-
-async function verifyCode() {
-  if (!email) return alert("Falta el e-mail");
-  if (code.trim().length !== 6) return alert("El código debe tener 6 dígitos");
-  try {
-    const { error } = await sb.auth.verifyOtp({
-      email,
-      token: code.trim(),
-      type: "email",
-    });
-    if (error) throw error;
-    setCode("");
-    setStep("email");
-    // onAuthStateChange ya setea userId y vas a quedar "Conectado"
-  } catch (e) {
-    alert(e?.message ?? "Código inválido");
-  }
-}
+// ⚠️ Dejado como referencia: ya no usamos magic links para iPhone PWA
+// async function signInWithMagic(email) {
+//   if (!email) return alert("Ingresá un email válido");
+//   const redirectTo = window?.location?.origin || "https://example.com"; // vuelve a esta misma app
+//   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+//   if (error) alert(error.message); else alert("Revisá tu email para iniciar sesión");
+// }
 
 async function getSession() {
   const { data } = await sb.auth.getSession();
@@ -165,10 +137,13 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState(null);
   const [lastSync, setLastSync] = useState(null);
+
+  // OTP UI state
   const [step, setStep] = useState("email"); // "email" | "code"
-const [code, setCode] = useState("");
+  const [code, setCode] = useState("");
 
   // Captura el magic link (#access_token=#...&refresh_token=...) y crea la sesión
+  // (puede quedar como fallback para escritorio; en iPhone PWA usaremos OTP)
   useEffect(() => {
     try {
       const hash = window?.location?.hash || "";
@@ -197,6 +172,45 @@ const [code, setCode] = useState("");
     });
     return () => sub.subscription?.unsubscribe?.();
   }, []);
+
+  // === OTP: enviar código y verificar (sin abrir Safari) ===
+  async function sendCode() {
+    if (!email) return alert("Ingresá un email válido");
+    try {
+      const { error } = await sb.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: true, // crea usuario si no existe
+          // clave: NO usar emailRedirectTo para evitar abrir Safari
+        },
+      });
+      if (error) throw error;
+      setStep("code");
+      alert("Te enviamos un código de 6 dígitos a tu e‑mail. Copialo y pegalo aquí.");
+    } catch (e) {
+      console.error("OTP error:", e);
+      alert(e?.message ?? "No pudimos enviar el código");
+    }
+  }
+
+  async function verifyCode() {
+    if (!email) return alert("Falta el e‑mail");
+    if (code.trim().length !== 6) return alert("El código debe tener 6 dígitos");
+    try {
+      const { error } = await sb.auth.verifyOtp({
+        email,
+        token: code.trim(),
+        type: "email",
+      });
+      if (error) throw error;
+      setCode("");
+      setStep("email");
+      // onAuthStateChange seteará userId => "Conectado"
+    } catch (e) {
+      console.error("OTP verify error:", e);
+      alert(e?.message ?? "Código inválido");
+    }
+  }
 
   // Derivados
   const categoriesById = useMemo(
@@ -232,47 +246,47 @@ const [code, setCode] = useState("");
     })).sort((a,b)=>b.amount-a.amount);
   }, [totals.byCat, categoriesById]);
 
-const dataByDay = useMemo(() => {
-  const [y, m] = filters.month.split("-").map(Number);
-  const lastDay = new Date(y, m, 0).getDate();
-  const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
+  const dataByDay = useMemo(() => {
+    const [y, m] = filters.month.split("-").map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+    const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
 
-  for (const e of db.expenses) {
-    if (!e?.date) continue;                                  // sin fecha -> ignoro
-    if (toMonthKey(e.date) !== filters.month) continue;      // otro mes -> ignoro
-    const t = new Date(e.date).getTime();
-    if (!Number.isFinite(t)) continue;                       // fecha inválida -> ignoro
-    const day = new Date(e.date).getDate();
-    if (day >= 1 && day <= lastDay) {
-      base[day - 1].amount += Number(e.amount ?? 0) || 0;
+    for (const e of db.expenses) {
+      if (!e?.date) continue;                                  // sin fecha -> ignoro
+      if (toMonthKey(e.date) !== filters.month) continue;      // otro mes -> ignoro
+      const t = new Date(e.date).getTime();
+      if (!Number.isFinite(t)) continue;                       // fecha inválida -> ignoro
+      const day = new Date(e.date).getDate();
+      if (day >= 1 && day <= lastDay) {
+        base[day - 1].amount += Number(e.amount ?? 0) || 0;
+      }
     }
-  }
-  return base;
-}, [db.expenses, filters.month]);
+    return base;
+  }, [db.expenses, filters.month]);
 
   // Acciones
-function addExpense(ev) {
-  ev.preventDefault();
+  function addExpense(ev) {
+    ev.preventDefault();
 
-  const date = (form.date || "").trim();
-  const timeOk = date && Number.isFinite(new Date(date).getTime());
-  if (!timeOk) { alert("Elegí una fecha válida (AAAA-MM-DD)"); return; }
+    const date = (form.date || "").trim();
+    const timeOk = date && Number.isFinite(new Date(date).getTime());
+    if (!timeOk) { alert("Elegí una fecha válida (AAAA-MM-DD)"); return; }
 
-  const amt = Number(String(form.amount ?? "").replace(",", "."));
-  if (!Number.isFinite(amt) || amt <= 0) { alert("Ingresá un monto válido (>0)"); return; }
+    const amt = Number(String(form.amount ?? "").replace(",", "."));
+    if (!Number.isFinite(amt) || amt <= 0) { alert("Ingresá un monto válido (>0)"); return; }
 
-  const id = crypto.randomUUID();
-  setDb(prev => ({
-    ...prev,
-    expenses: [
-      ...prev.expenses,
-      { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
-    ],
-  }));
+    const id = crypto.randomUUID();
+    setDb(prev => ({
+      ...prev,
+      expenses: [
+        ...prev.expenses,
+        { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
+      ],
+    }));
 
-  setForm(f => ({ ...f, amount: "", note: "" }));
-  amountRef.current?.focus();
-}
+    setForm(f => ({ ...f, amount: "", note: "" }));
+    amountRef.current?.focus();
+  }
   function removeExpense(id) {
     if (!confirm("¿Eliminar gasto?")) return;
     setDb(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
@@ -281,7 +295,7 @@ function addExpense(ev) {
   function addCategory() {
     const name = prompt("Nombre de la nueva categoría:")?.trim();
     if (!name) return;
-    const id = name.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const id = name.toLowerCase().normalize("NFD").replace(/\\p{Diacritic}/gu, "").replace(/\\s+/g, "-").replace(/[^a-z0-9-]/g, "");
     if (db.categories.some(c => c.id === id)) return alert("Ya existe una categoría con ese nombre");
     setDb(prev => ({ ...prev, categories: [...prev.categories, { id, name }] }));
   }
@@ -302,8 +316,8 @@ function addExpense(ev) {
 
   function exportCSV() {
     const header = ["id", "date", "amount", "category", "note"]; 
-    const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\n"," ")]);
-    const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
+    const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\\n"," ")]);
+    const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -364,54 +378,52 @@ function addExpense(ev) {
         {/* Auth & Sync */}
         <section className="bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div className="flex items-center gap-2">
-         {userId ? (
-  <div className="text-sm">
-    Conectado · <span className="font-mono">{userId.slice(0,8)}…</span>
-  </div>
-) : (
-  <>
-    {step === "email" ? (
-      <div className="flex items-end gap-2">
-        <div className="flex flex-col">
-          <label className="text-sm">Email para iniciar sesión</label>
-          <input
-            className="border rounded-xl p-2"
-            placeholder="tu@email"
-            value={email}
-            onChange={(e)=>setEmail(e.target.value)}
-          />
-        </div>
-        <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border">
-          Enviar código
-        </button>
-      </div>
-    ) : (
-      <div className="flex items-end gap-2">
-        <div className="flex flex-col">
-          <label className="text-sm">Código de 6 dígitos</label>
-          <input
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={6}
-            className="border rounded-xl p-2 tracking-widest text-center"
-            placeholder="••••••"
-            value={code}
-            onChange={(e)=>setCode(e.target.value.replace(/\D/g, ""))}
-          />
-        </div>
-        <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">
-          Confirmar
-        </button>
-        <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">
-          Reenviar
-        </button>
-        <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">
-          Cambiar e-mail
-        </button>
-      </div>
-    )}
-  </>
-)}
+            {userId ? (
+              <div className="text-sm">Conectado · <span className="font-mono">{userId.slice(0,8)}…</span></div>
+            ) : (
+              <>
+                {step === "email" ? (
+                  <div className="flex items-end gap-2">
+                    <div className="flex flex-col">
+                      <label className="text-sm">Email para iniciar sesión</label>
+                      <input
+                        className="border rounded-xl p-2"
+                        placeholder="tu@email"
+                        value={email}
+                        onChange={(e)=>setEmail(e.target.value)}
+                      />
+                    </div>
+                    <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border">
+                      Enviar código
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-end gap-2">
+                    <div className="flex flex-col">
+                      <label className="text-sm">Código de 6 dígitos</label>
+                      <input
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        maxLength={6}
+                        className="border rounded-xl p-2 tracking-widest text-center"
+                        placeholder="••••••"
+                        value={code}
+                        onChange={(e)=>setCode(e.target.value.replace(/\\D/g, ""))}
+                      />
+                    </div>
+                    <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">
+                      Confirmar
+                    </button>
+                    <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">
+                      Reenviar
+                    </button>
+                    <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">
+                      Cambiar e-mail
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={doPull} className="px-3 py-2 rounded-xl bg-white border">Pull</button>
