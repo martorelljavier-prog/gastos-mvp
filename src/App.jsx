@@ -3,11 +3,20 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { createClient } from "@supabase/supabase-js";
 
 // --- Gastos — MVP (React) ---
+// Enforce canonical domain so magic links siempre vuelvan al dominio correcto
+const CANONICAL_HOST = "gastos-mvp.vercel.app";
+if (typeof window !== "undefined" && window.location.host !== CANONICAL_HOST) {
+  window.location.href = `https://${CANONICAL_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`;
+}
+
 // Offline-first (localStorage) + Sync manual en Supabase. Gráficos por categoría y por día.
 
 const SUPABASE_URL = "https://qugnkfjbfqcihummbaal.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+
+// Helper: dominio actual (para debug)
+console.debug("Host actual:", typeof window !== 'undefined' ? window.location.host : '(SSR)');
 
 // Helpers
 const LS_KEY = "gastos_mvp_v1";
