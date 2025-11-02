@@ -364,17 +364,54 @@ function addExpense(ev) {
         {/* Auth & Sync */}
         <section className="bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div className="flex items-center gap-2">
-            {userId ? (
-              <div className="text-sm">Conectado · <span className="font-mono">{userId.slice(0,8)}…</span></div>
-            ) : (
-              <div className="flex items-end gap-2">
-                <div className="flex flex-col">
-                  <label className="text-sm">Email para iniciar sesión</label>
-                  <input className="border rounded-xl p-2" placeholder="tu@email" value={email} onChange={(e)=>setEmail(e.target.value)} />
-                </div>
-                <button onClick={()=>signInWithMagic(email)} className="px-3 py-2 rounded-xl bg-white border">Iniciar sesión</button>
-              </div>
-            )}
+         {userId ? (
+  <div className="text-sm">
+    Conectado · <span className="font-mono">{userId.slice(0,8)}…</span>
+  </div>
+) : (
+  <>
+    {step === "email" ? (
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col">
+          <label className="text-sm">Email para iniciar sesión</label>
+          <input
+            className="border rounded-xl p-2"
+            placeholder="tu@email"
+            value={email}
+            onChange={(e)=>setEmail(e.target.value)}
+          />
+        </div>
+        <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border">
+          Enviar código
+        </button>
+      </div>
+    ) : (
+      <div className="flex items-end gap-2">
+        <div className="flex flex-col">
+          <label className="text-sm">Código de 6 dígitos</label>
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={6}
+            className="border rounded-xl p-2 tracking-widest text-center"
+            placeholder="••••••"
+            value={code}
+            onChange={(e)=>setCode(e.target.value.replace(/\D/g, ""))}
+          />
+        </div>
+        <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">
+          Confirmar
+        </button>
+        <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">
+          Reenviar
+        </button>
+        <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">
+          Cambiar e-mail
+        </button>
+      </div>
+    )}
+  </>
+)}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={doPull} className="px-3 py-2 rounded-xl bg-white border">Pull</button>
