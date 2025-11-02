@@ -38,11 +38,40 @@ function useLocalState(defaultValue) {
 }
 
 // ---- Supabase helpers (snapshot por usuario)
-async function signInWithMagic(email) {
+async function sendCode() {
   if (!email) return alert("Ingresá un email válido");
-  const redirectTo = window?.location?.origin || "https://example.com"; // vuelve a esta misma app
-  const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
-  if (error) alert(error.message); else alert("Revisá tu email para iniciar sesión");
+  try {
+    const { error } = await sb.auth.signInWithOtp({
+      email,
+      options: {
+        shouldCreateUser: true,   // crea usuario si no existe
+        // clave: NO usar emailRedirectTo para evitar abrir Safari
+      },
+    });
+    if (error) throw error;
+    setStep("code");
+    alert("Te enviamos un código de 6 dígitos a tu e-mail. Copialo y pegalo aquí.");
+  } catch (e) {
+    alert(e?.message ?? "No pudimos enviar el código");
+  }
+}
+
+async function verifyCode() {
+  if (!email) return alert("Falta el e-mail");
+  if (code.trim().length !== 6) return alert("El código debe tener 6 dígitos");
+  try {
+    const { error } = await sb.auth.verifyOtp({
+      email,
+      token: code.trim(),
+      type: "email",
+    });
+    if (error) throw error;
+    setCode("");
+    setStep("email");
+    // onAuthStateChange ya setea userId y vas a quedar "Conectado"
+  } catch (e) {
+    alert(e?.message ?? "Código inválido");
+  }
 }
 
 async function getSession() {
