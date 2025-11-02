@@ -180,64 +180,53 @@ export default function App() {
     }
   }
 
-  // === Fallback universal: pegar Magic Link dentro de la PWA ===
-  
-  // === Fallback universal: pegar Magic Link dentro de la PWA ===
-  async function importMagicLink() {
-    if (!link) { alert("Pegá el enlace completo del mail"); return; }
-    try {
-      const url = new URL(link);
+  // --- START: importMagicLink (reemplazar todo este bloque) ---
+async function importMagicLink() {
+  if (!link) { alert("Pegá el enlace completo del mail"); return; }
 
-      // Caso A: PKCE ?code=...
-      const codeParam = url.searchParams.get("code");
-      if (codeParam) {
-        const { error } = await sb.auth.exchangeCodeForSession(codeParam);
+  try {
+    const url = new URL(link);
+
+    // A) PKCE ?code=...
+    const codeParam = url.searchParams.get("code");
+    if (codeParam) {
+      const { error } = await sb.auth.exchangeCodeForSession(codeParam);
+      if (error) throw error;
+      setLink(""); setStep("email");
+      return;
+    }
+
+    // B) token_hash + type (magiclink/signup/recovery/invite/email_change)
+    const token_hash = url.searchParams.get("token_hash") || url.searchParams.get("token");
+    const flowType = url.searchParams.get("type");
+    if (token_hash && flowType) {
+      const { error } = await sb.auth.verifyOtp({ token_hash, type: flowType });
+      if (error) throw error;
+      setLink(""); setStep("email");
+      return;
+    }
+
+    // C) Fragmento con tokens: #access_token=&refresh_token=
+    const hashIndex = link.indexOf("#");
+    if (hashIndex !== -1) {
+      const q = new URLSearchParams(link.slice(hashIndex + 1));
+      const at = q.get("access_token");
+      const rt = q.get("refresh_token");
+      if (at && rt) {
+        const { error } = await sb.auth.setSession({ access_token: at, refresh_token: rt });
         if (error) throw error;
-        setLink("");
-        setStep("email");
+        setLink(""); setStep("email");
         return;
       }
-
-      // Caso B: Token hash de Supabase ?token_hash=...&type=magiclink|signup|recovery|invite|email_change
-      const token_hash = url.searchParams.get("token_hash") || url.searchParams.get("token");
-      const flowType = url.searchParams.get("type"); // magiclink / signup / recovery / invite / email_change
-      if (token_hash && flowType) {
-        const { error } = await sb.auth.verifyOtp({ token_hash, type: flowType });
-        if (error) throw error;
-        setLink("");
-        setStep("email");
-        return;
-      }
-
-      // Caso C: fragmento con access_token / refresh_token
-      const fragmentIndex = link.indexOf("#");
-      if (fragmentIndex !== -1) {
-        const fragment = link.slice(fragmentIndex + 1);
-        const p = new URLSearchParams(fragment);
-        const access_token = p.get("access_token");
-        const refresh_token = p.get("refresh_token");
-        if (access_token && refresh_token) {
-          const { error } = await sb.auth.setSession({ access_token, refresh_token });
-          if (error) throw error;
-          setLink("");
-          setStep("email");
-          return;
-        }
-      }
-
-      alert("No pude reconocer el enlace. Pegá el link completo del mail (https://… con sus parámetros).");
-    } catch (e) {
-      console.error("Import link error:", e);
-      alert(e?.message ?? "No pudimos importar el enlace");
     }
-  }
 
-      alert("No pude reconocer el enlace. Pegá el link completo del mail.");
-    } catch (e) {
-      console.error("Import link error:", e);
-      alert(e?.message ?? "No pudimos importar el enlace");
-    }
+    alert("No pude reconocer el enlace. Pegá el link completo del mail.");
+  } catch (e) {
+    console.error("Import link error:", e);
+    alert(e && e.message ? e.message : "No pudimos importar el enlace");
   }
+}
+// --- END: importMagicLink ---
 
   // Derivados
   const categoriesById = useMemo(() => Object.fromEntries(db.categories.map(c => [c.id, c])), [db.categories]);
