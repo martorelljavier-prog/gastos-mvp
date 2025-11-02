@@ -411,7 +411,7 @@ export default function App() {
                 )}
 
                 {step === "code" && (
-                  <div className="flex items-end gap-2">
+                  <div className="flex items-end gap-2 flex-wrap">
                     <div className="flex flex-col">
                       <label className="text-sm">Código de 6 dígitos</label>
                       <input
@@ -427,6 +427,7 @@ export default function App() {
                     <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">Confirmar</button>
                     <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">Reenviar</button>
                     <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">Cambiar e-mail</button>
+                    <button onClick={()=>{ setStep("link"); }} className="px-3 py-2 rounded-xl bg-white border">Tengo un link</button>
                   </div>
                 )}
 
