@@ -203,7 +203,21 @@ export default function App() {
 
   const dataByDay = useMemo(() => {
   const [y, m] = filters.month.split("-").map(Number);
- ;
+  const lastDay = new Date(y, m, 0).getDate();
+  const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
+
+  for (const e of db.expenses) {
+    if (!e || !e.date) continue;                         // sin fecha -> ignoro
+    if (toMonthKey(e.date) !== filters.month) continue;  // otro mes -> ignoro
+    const d = new Date(e.date);
+    const t = d.getTime();
+    if (!Number.isFinite(t)) continue;                   // fecha inválida -> ignoro
+    const day = d.getDate();
+    if (day >= 1 && day <= lastDay && base[day - 1]) {
+      base[day - 1].amount += Number(e.amount ?? 0) || 0;
+    }
+  }
+  return base;
 }, [db.expenses, filters.month]);
 
   // Acciones
@@ -229,7 +243,7 @@ export default function App() {
       ...prev.expenses,
       { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
     ],
-  }))}
+  }
   function removeExpense(id) {
     if (!confirm("¿Eliminar gasto?")) return;
     setDb(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
