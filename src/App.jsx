@@ -136,6 +136,8 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState(null);
   const [lastSync, setLastSync] = useState(null);
+  const [step, setStep] = useState("email"); // "email" | "code"
+const [code, setCode] = useState("");
 
   // Captura el magic link (#access_token=#...&refresh_token=...) y crea la sesión
   useEffect(() => {
