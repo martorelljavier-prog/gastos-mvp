@@ -295,7 +295,7 @@ export default function App() {
   function addCategory() {
     const name = prompt("Nombre de la nueva categoría:")?.trim();
     if (!name) return;
-    const id = name.toLowerCase().normalize("NFD").replace(/\\p{Diacritic}/gu, "").replace(/\\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const id = name.toLowerCase().normalize("NFD").replace(/\[\u0300-\u036f]/gu, "").replace(/\\s+/g, "-").replace(/[^a-z0-9-]/g, "");
     if (db.categories.some(c => c.id === id)) return alert("Ya existe una categoría con ese nombre");
     setDb(prev => ({ ...prev, categories: [...prev.categories, { id, name }] }));
   }
