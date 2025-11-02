@@ -184,8 +184,9 @@ export default function App() {
   async function importMagicLink() {
     if (!link) return alert("Pegá el enlace completo del mail");
     try {
-      // 1) ¿PKCE code en query?  https://.../auth/v1/callback?code=xyz
       const url = new URL(link);
+
+      // Caso A: PKCE ?code=...
       const codeParam = url.searchParams.get("code");
       if (codeParam) {
         const { error } = await sb.auth.exchangeCodeForSession(codeParam);
@@ -194,7 +195,19 @@ export default function App() {
         setStep("email");
         return;
       }
-      // 2) ¿tokens en el fragmento?  #access_token=...&refresh_token=...
+
+      // Caso B: Token hash de Supabase ?token_hash=...&type=magiclink|signup|recovery|invite|email_change
+      const token_hash = url.searchParams.get("token_hash") || url.searchParams.get("token");
+      const flowType = url.searchParams.get("type"); // magiclink / signup / recovery / invite / email_change
+      if (token_hash && flowType) {
+        const { error } = await sb.auth.verifyOtp({ token_hash, type: flowType });
+        if (error) throw error;
+        setLink("");
+        setStep("email");
+        return;
+      }
+
+      // Caso C: fragmento con access_token / refresh_token
       const fragment = link.split("#")[1];
       if (fragment) {
         const p = new URLSearchParams(fragment);
@@ -208,6 +221,13 @@ export default function App() {
           return;
         }
       }
+
+      alert("No pude reconocer el enlace. Pegá el link completo del mail (empieza con https:// y trae los parámetros).");
+    } catch (e) {
+      console.error("Import link error:", e);
+      alert(e?.message ?? "No pudimos importar el enlace");
+    }
+  }
       alert("No pude reconocer el enlace. Pegá el link completo del mail.");
     } catch (e) {
       console.error("Import link error:", e);
