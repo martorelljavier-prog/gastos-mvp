@@ -275,7 +275,7 @@ export default function App() {
     const amt = Number(String(form.amount ?? "").replace(",", "."));
     if (!Number.isFinite(amt) || amt <= 0) { alert("Ingresá un monto válido (>0)"); return; }
 
-    const id = crypto.randomUUID();
+    const id = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
     setDb(prev => ({
       ...prev,
       expenses: [
@@ -295,7 +295,7 @@ export default function App() {
   function addCategory() {
     const name = prompt("Nombre de la nueva categoría:")?.trim();
     if (!name) return;
-    const id = name.toLowerCase().normalize("NFD").replace(/\[\u0300-\u036f]/gu, "").replace(/\\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const id = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
     if (db.categories.some(c => c.id === id)) return alert("Ya existe una categoría con ese nombre");
     setDb(prev => ({ ...prev, categories: [...prev.categories, { id, name }] }));
   }
