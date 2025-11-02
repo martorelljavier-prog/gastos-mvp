@@ -181,8 +181,10 @@ export default function App() {
   }
 
   // === Fallback universal: pegar Magic Link dentro de la PWA ===
+  
+  // === Fallback universal: pegar Magic Link dentro de la PWA ===
   async function importMagicLink() {
-    if (!link) return alert("Pegá el enlace completo del mail");
+    if (!link) { alert("Pegá el enlace completo del mail"); return; }
     try {
       const url = new URL(link);
 
@@ -208,8 +210,9 @@ export default function App() {
       }
 
       // Caso C: fragmento con access_token / refresh_token
-      const fragment = link.split("#")[1];
-      if (fragment) {
+      const fragmentIndex = link.indexOf("#");
+      if (fragmentIndex !== -1) {
+        const fragment = link.slice(fragmentIndex + 1);
         const p = new URLSearchParams(fragment);
         const access_token = p.get("access_token");
         const refresh_token = p.get("refresh_token");
@@ -222,12 +225,13 @@ export default function App() {
         }
       }
 
-      alert("No pude reconocer el enlace. Pegá el link completo del mail (empieza con https:// y trae los parámetros).");
+      alert("No pude reconocer el enlace. Pegá el link completo del mail (https://… con sus parámetros).");
     } catch (e) {
       console.error("Import link error:", e);
       alert(e?.message ?? "No pudimos importar el enlace");
     }
   }
+
       alert("No pude reconocer el enlace. Pegá el link completo del mail.");
     } catch (e) {
       console.error("Import link error:", e);
