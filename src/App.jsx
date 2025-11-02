@@ -202,52 +202,52 @@ export default function App() {
   }, [totals.byCat, categoriesById]);
 
   const dataByDay = useMemo(() => {
-    const [y, m] = filters.month.split("-").map(Number);
-    const lastDay = new Date(y, m, 0).getDate();
-    const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
-    for (const e of db.expenses) {
-      if (!e?.date) continue; // proteger si falta fecha
-      if (toMonthKey(e.date) !== filters.month) continue;
-      const d = new Date(e.date);
-      const t = d.getTime();
-      if (!Number.isFinite(t)) continue; // fecha inválida
-      const day = d.getDate();
-      if (day >= 1 && day <= lastDay) {
-        base[day - 1].amount += Number(e.amount || 0) || 0;
-      }
+  const [y, m] = filters.month.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
+
+  for (const e of db.expenses) {
+    if (!e || !e.date) continue;                         // sin fecha -> ignoro
+    if (toMonthKey(e.date) !== filters.month) continue;  // otro mes -> ignoro
+    const d = new Date(e.date);
+    const t = d.getTime();
+    if (!Number.isFinite(t)) continue;                   // fecha inválida -> ignoro
+    const day = d.getDate();
+    if (day >= 1 && day <= lastDay && base[day - 1]) {
+      base[day - 1].amount += Number(e.amount ?? 0) || 0;
     }
-    return base;
-  }, [db.expenses, filters.month]);
-    const lastDay = new Date(y, m, 0).getDate();
-    const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
-    for (const e of db.expenses) {
-      if (toMonthKey(e.date) !== filters.month) continue;
-      const d = new Date(e.date);
-      const day = d.getDate();
-      base[day - 1].amount += Number(e.amount || 0);
-    }
-    return base;
-  }, [db.expenses, filters.month]);
+  }
+  return base;
+}, [db.expenses, filters.month]);
 
   // Acciones
-  function addExpense(ev) {
-    ev.preventDefault();
-    const date = form.date?.trim();
-    if (!date) return alert("Elegí una fecha válida");
-    const amt = Number(String(form.amount).replace(",", "."));
-    if (!Number.isFinite(amt) || amt <= 0) return alert("Ingresá un monto válido");
-    const id = crypto.randomUUID();
-    setDb(prev => ({
-      ...prev,
-      expenses: [...prev.expenses, { id, date, amount: amt, categoryId: form.categoryId, note: form.note?.trim() }],
-    }));
-    setForm(f => ({ ...f, amount: "", note: "" }));
-    amountRef.current?.focus();
-  }));
-    setForm(f => ({ ...f, amount: "", note: "" }));
-    amountRef.current?.focus();
+ function addExpense(ev) {
+  ev.preventDefault();
+
+  const date = (form.date || "").trim();
+  if (!/\d{4}-\d{2}-\d{2}/.test(date)) {
+    alert("Elegí una fecha válida (AAAA-MM-DD)");
+    return;
   }
 
+  const amt = Number(String(form.amount ?? "").replace(",", "."));
+  if (!Number.isFinite(amt) || amt <= 0) {
+    alert("Ingresá un monto válido (>0)");
+    return;
+  }
+
+  const id = crypto.randomUUID();
+  setDb(prev => ({
+    ...prev,
+    expenses: [
+      ...prev.expenses,
+      { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
+    ],
+  }));
+
+  setForm(f => ({ ...f, amount: "", note: "" }));
+  amountRef.current?.focus();
+}
   function removeExpense(id) {
     if (!confirm("¿Eliminar gasto?")) return;
     setDb(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
