@@ -243,11 +243,7 @@ export default function App() {
       ...prev.expenses,
       { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
     ],
-  }));
-
-  setForm(f => ({ ...f, amount: "", note: "" }));
-  amountRef.current?.focus();
-}
+  }
   function removeExpense(id) {
     if (!confirm("¿Eliminar gasto?")) return;
     setDb(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
