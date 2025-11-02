@@ -201,19 +201,18 @@ export default function App() {
     })).sort((a,b)=>b.amount-a.amount);
   }, [totals.byCat, categoriesById]);
 
-  const dataByDay = useMemo(() => {
+const dataByDay = useMemo(() => {
   const [y, m] = filters.month.split("-").map(Number);
   const lastDay = new Date(y, m, 0).getDate();
   const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
 
   for (const e of db.expenses) {
-    if (!e || !e.date) continue;                         // sin fecha -> ignoro
-    if (toMonthKey(e.date) !== filters.month) continue;  // otro mes -> ignoro
-    const d = new Date(e.date);
-    const t = d.getTime();
-    if (!Number.isFinite(t)) continue;                   // fecha inválida -> ignoro
-    const day = d.getDate();
-    if (day >= 1 && day <= lastDay && base[day - 1]) {
+    if (!e?.date) continue;                                  // sin fecha -> ignoro
+    if (toMonthKey(e.date) !== filters.month) continue;      // otro mes -> ignoro
+    const t = new Date(e.date).getTime();
+    if (!Number.isFinite(t)) continue;                       // fecha inválida -> ignoro
+    const day = new Date(e.date).getDate();
+    if (day >= 1 && day <= lastDay) {
       base[day - 1].amount += Number(e.amount ?? 0) || 0;
     }
   }
@@ -221,20 +220,15 @@ export default function App() {
 }, [db.expenses, filters.month]);
 
   // Acciones
- function addExpense(ev) {
+function addExpense(ev) {
   ev.preventDefault();
 
   const date = (form.date || "").trim();
-  if (!/\d{4}-\d{2}-\d{2}/.test(date)) {
-    alert("Elegí una fecha válida (AAAA-MM-DD)");
-    return;
-  }
+  const timeOk = date && Number.isFinite(new Date(date).getTime());
+  if (!timeOk) { alert("Elegí una fecha válida (AAAA-MM-DD)"); return; }
 
   const amt = Number(String(form.amount ?? "").replace(",", "."));
-  if (!Number.isFinite(amt) || amt <= 0) {
-    alert("Ingresá un monto válido (>0)");
-    return;
-  }
+  if (!Number.isFinite(amt) || amt <= 0) { alert("Ingresá un monto válido (>0)"); return; }
 
   const id = crypto.randomUUID();
   setDb(prev => ({
@@ -243,7 +237,11 @@ export default function App() {
       ...prev.expenses,
       { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
     ],
-  }
+  }));
+
+  setForm(f => ({ ...f, amount: "", note: "" }));
+  amountRef.current?.focus();
+}
   function removeExpense(id) {
     if (!confirm("¿Eliminar gasto?")) return;
     setDb(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
