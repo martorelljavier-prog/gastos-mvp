@@ -3,7 +3,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGri
 import { createClient } from "@supabase/supabase-js";
 
 // --- Gastos — MVP (React) ---
-// Enforce canonical domain so magic links siempre vuelvan al dominio correcto
+// Enforce canonical domain so magic links/OTP siempre vuelvan al dominio correcto
 const CANONICAL_HOST = "gastos-mvp.vercel.app";
 if (typeof window !== "undefined" && window.location.host !== CANONICAL_HOST) {
   window.location.href = `https://${CANONICAL_HOST}${window.location.pathname}${window.location.search}${window.location.hash}`;
@@ -11,9 +11,10 @@ if (typeof window !== "undefined" && window.location.host !== CANONICAL_HOST) {
 
 // Offline-first (localStorage) + Sync manual en Supabase. Gráficos por categoría y por día.
 
+// ⚠️ Usa tu Project URL y anon key reales.
 const SUPABASE_URL = "https://qugnkfjbfqcihummbaal.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON);
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSession: true, autoRefreshToken: true } });
 
 // Helper: dominio actual (para debug)
 console.debug("Host actual:", typeof window !== 'undefined' ? window.location.host : '(SSR)');
@@ -35,34 +36,6 @@ function useLocalState(defaultValue) {
   });
   useEffect(() => { localStorage.setItem(LS_KEY, JSON.stringify(state)); }, [state]);
   return [state, setState];
-}
-
-// ---- Supabase helpers (snapshot por usuario)
-// ⚠️ Dejado como referencia: ya no usamos magic links para iPhone PWA
-// async function signInWithMagic(email) {
-//   if (!email) return alert("Ingresá un email válido");
-//   const redirectTo = window?.location?.origin || "https://example.com"; // vuelve a esta misma app
-//   const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
-//   if (error) alert(error.message); else alert("Revisá tu email para iniciar sesión");
-// }
-
-async function getSession() {
-  const { data } = await sb.auth.getSession();
-  return data.session;
-}
-
-async function pullRemote(userId) {
-  const { data, error } = await sb.from("gastos_snapshots").select("payload").eq("user_id", userId).single();
-  if (error && error.code !== "PGRST116") { // not found está ok
-    alert("Pull error: " + error.message);
-    return null;
-  }
-  return data?.payload || null;
-}
-
-async function pushRemote(userId, payload) {
-  const { error } = await sb.from("gastos_snapshots").upsert({ user_id: userId, payload, updated_at: new Date().toISOString() });
-  if (error) alert("Push error: " + error.message);
 }
 
 // === Registrar Service Worker (PWA) ===
@@ -138,12 +111,12 @@ export default function App() {
   const [userId, setUserId] = useState(null);
   const [lastSync, setLastSync] = useState(null);
 
-  // OTP UI state
-  const [step, setStep] = useState("email"); // "email" | "code"
+  // UI auth
+  const [step, setStep] = useState("email"); // "email" | "code" | "link"
   const [code, setCode] = useState("");
+  const [link, setLink] = useState("");
 
-  // Captura el magic link (#access_token=#...&refresh_token=...) y crea la sesión
-  // (puede quedar como fallback para escritorio; en iPhone PWA usaremos OTP)
+  // Fallback: captura magic link cuando abre en el mismo origen (escritorio)
   useEffect(() => {
     try {
       const hash = window?.location?.hash || "";
@@ -155,7 +128,6 @@ export default function App() {
           sb.auth.setSession({ access_token, refresh_token }).then(({ data, error }) => {
             if (!error && data?.session?.user?.id) {
               setUserId(data.session.user.id);
-              // Limpio el hash de la URL para que no quede visible
               const { origin, pathname, search } = window.location;
               window.history.replaceState({}, document.title, origin + pathname + search);
             }
@@ -166,14 +138,15 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    getSession().then((s) => setUserId(s?.user?.id || null));
-    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => {
-      setUserId(session?.user?.id || null);
-    });
+    (async () => {
+      const { data } = await sb.auth.getSession();
+      setUserId(data.session?.user?.id || null);
+    })();
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => setUserId(session?.user?.id || null));
     return () => sub.subscription?.unsubscribe?.();
   }, []);
 
-  // === OTP: enviar código y verificar (sin abrir Safari) ===
+  // === OTP (no Safari) ===
   async function sendCode() {
     if (!email) return alert("Ingresá un email válido");
     try {
@@ -181,12 +154,12 @@ export default function App() {
         email,
         options: {
           shouldCreateUser: true, // crea usuario si no existe
-          // clave: NO usar emailRedirectTo para evitar abrir Safari
+          // ¡sin emailRedirectTo! → evita magic link por redirección
         },
       });
       if (error) throw error;
       setStep("code");
-      alert("Te enviamos un código de 6 dígitos a tu e‑mail. Copialo y pegalo aquí.");
+      alert("Te enviamos un código de 6 dígitos. Copialo del mail y pegalo aquí.");
     } catch (e) {
       console.error("OTP error:", e);
       alert(e?.message ?? "No pudimos enviar el código");
@@ -194,29 +167,56 @@ export default function App() {
   }
 
   async function verifyCode() {
-    if (!email) return alert("Falta el e‑mail");
+    if (!email) return alert("Falta el e-mail");
     if (code.trim().length !== 6) return alert("El código debe tener 6 dígitos");
     try {
-      const { error } = await sb.auth.verifyOtp({
-        email,
-        token: code.trim(),
-        type: "email",
-      });
+      const { error } = await sb.auth.verifyOtp({ email, token: code.trim(), type: "email" });
       if (error) throw error;
       setCode("");
       setStep("email");
-      // onAuthStateChange seteará userId => "Conectado"
     } catch (e) {
       console.error("OTP verify error:", e);
       alert(e?.message ?? "Código inválido");
     }
   }
 
+  // === Fallback universal: pegar Magic Link dentro de la PWA ===
+  async function importMagicLink() {
+    if (!link) return alert("Pegá el enlace completo del mail");
+    try {
+      // 1) ¿PKCE code en query?  https://.../auth/v1/callback?code=xyz
+      const url = new URL(link);
+      const codeParam = url.searchParams.get("code");
+      if (codeParam) {
+        const { error } = await sb.auth.exchangeCodeForSession(codeParam);
+        if (error) throw error;
+        setLink("");
+        setStep("email");
+        return;
+      }
+      // 2) ¿tokens en el fragmento?  #access_token=...&refresh_token=...
+      const fragment = link.split("#")[1];
+      if (fragment) {
+        const p = new URLSearchParams(fragment);
+        const access_token = p.get("access_token");
+        const refresh_token = p.get("refresh_token");
+        if (access_token && refresh_token) {
+          const { error } = await sb.auth.setSession({ access_token, refresh_token });
+          if (error) throw error;
+          setLink("");
+          setStep("email");
+          return;
+        }
+      }
+      alert("No pude reconocer el enlace. Pegá el link completo del mail.");
+    } catch (e) {
+      console.error("Import link error:", e);
+      alert(e?.message ?? "No pudimos importar el enlace");
+    }
+  }
+
   // Derivados
-  const categoriesById = useMemo(
-    () => Object.fromEntries(db.categories.map(c => [c.id, c])),
-    [db.categories]
-  );
+  const categoriesById = useMemo(() => Object.fromEntries(db.categories.map(c => [c.id, c])), [db.categories]);
 
   const expensesFiltered = useMemo(() => {
     return db.expenses
@@ -275,7 +275,7 @@ export default function App() {
     const amt = Number(String(form.amount ?? "").replace(",", "."));
     if (!Number.isFinite(amt) || amt <= 0) { alert("Ingresá un monto válido (>0)"); return; }
 
-    const id = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const id = crypto.randomUUID();
     setDb(prev => ({
       ...prev,
       expenses: [
@@ -295,7 +295,12 @@ export default function App() {
   function addCategory() {
     const name = prompt("Nombre de la nueva categoría:")?.trim();
     if (!name) return;
-    const id = name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+    const id = name
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")   // quita diacríticos
+      .replace(/\s+/g, "-")
+      .replace(/[^a-z0-9-]/g, "");
     if (db.categories.some(c => c.id === id)) return alert("Ya existe una categoría con ese nombre");
     setDb(prev => ({ ...prev, categories: [...prev.categories, { id, name }] }));
   }
@@ -316,8 +321,8 @@ export default function App() {
 
   function exportCSV() {
     const header = ["id", "date", "amount", "category", "note"]; 
-    const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\\n"," ")]);
-    const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\\n");
+    const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\n"," ")]);
+    const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -343,9 +348,13 @@ export default function App() {
   // --- Sync manual (fuera de useEffect)
   async function doPull() {
     if (!userId) return alert("Iniciá sesión para sincronizar");
-    const remote = await pullRemote(userId);
-    if (remote) {
-      setDb(remote);
+    const remote = await sb.from("gastos_snapshots").select("payload").eq("user_id", userId).single();
+    if (remote.error && remote.error.code !== "PGRST116") {
+      alert("Pull error: " + remote.error.message);
+      return;
+    }
+    if (remote.data?.payload) {
+      setDb(remote.data.payload);
       setLastSync(new Date());
     } else {
       alert("No hay datos remotos aún");
@@ -353,8 +362,9 @@ export default function App() {
   }
   async function doPush() {
     if (!userId) return alert("Iniciá sesión para sincronizar");
-    await pushRemote(userId, db);
-    setLastSync(new Date());
+    const { error } = await sb.from("gastos_snapshots").upsert({ user_id: userId, payload: db, updated_at: new Date().toISOString() });
+    if (error) alert("Push error: " + error.message);
+    else setLastSync(new Date());
   }
 
   return (
@@ -382,8 +392,8 @@ export default function App() {
               <div className="text-sm">Conectado · <span className="font-mono">{userId.slice(0,8)}…</span></div>
             ) : (
               <>
-                {step === "email" ? (
-                  <div className="flex items-end gap-2">
+                {step === "email" && (
+                  <div className="flex flex-col gap-2 md:flex-row md:items-end">
                     <div className="flex flex-col">
                       <label className="text-sm">Email para iniciar sesión</label>
                       <input
@@ -393,11 +403,14 @@ export default function App() {
                         onChange={(e)=>setEmail(e.target.value)}
                       />
                     </div>
-                    <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border">
-                      Enviar código
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border">Enviar código</button>
+                      <button onClick={()=>setStep("link")} className="px-3 py-2 rounded-xl bg-white border">Tengo un link</button>
+                    </div>
                   </div>
-                ) : (
+                )}
+
+                {step === "code" && (
                   <div className="flex items-end gap-2">
                     <div className="flex flex-col">
                       <label className="text-sm">Código de 6 dígitos</label>
@@ -408,18 +421,28 @@ export default function App() {
                         className="border rounded-xl p-2 tracking-widest text-center"
                         placeholder="••••••"
                         value={code}
-                        onChange={(e)=>setCode(e.target.value.replace(/\\D/g, ""))}
+                        onChange={(e)=>setCode(e.target.value.replace(/\D/g, ""))}
                       />
                     </div>
-                    <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">
-                      Confirmar
-                    </button>
-                    <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">
-                      Reenviar
-                    </button>
-                    <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">
-                      Cambiar e-mail
-                    </button>
+                    <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">Confirmar</button>
+                    <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">Reenviar</button>
+                    <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">Cambiar e-mail</button>
+                  </div>
+                )}
+
+                {step === "link" && (
+                  <div className="flex items-end gap-2 md:w-[640px]">
+                    <div className="flex flex-col flex-1">
+                      <label className="text-sm">Pegar Magic Link del mail</label>
+                      <input
+                        className="border rounded-xl p-2"
+                        placeholder="Pegá acá el enlace completo del mail"
+                        value={link}
+                        onChange={(e)=>setLink(e.target.value)}
+                      />
+                    </div>
+                    <button onClick={importMagicLink} className="px-3 py-2 rounded-xl bg-white border">Importar link</button>
+                    <button onClick={()=>{ setStep("email"); setLink(""); }} className="px-3 py-2 rounded-xl bg-white border">Volver</button>
                   </div>
                 )}
               </>
