@@ -180,14 +180,39 @@ export default function App() {
     }
   }
 
-  // --- START: importMagicLink (reemplazar todo este bloque) ---
-async function importMagicLink() {
-  if (!link) { alert("Pegá el enlace completo del mail"); return; }
-
+ // --- START: importMagicLink + OTP robusto ---
+async function importAuthCode() {
+  if (!link) { alert("Pegá el código de 6 dígitos o el enlace completo"); return; }
+  
   try {
-    const url = new URL(link);
-
-    // A) PKCE ?code=...
+    const raw = link.trim().replace(/\u201C|\u201D/g, '"');
+    
+    // A) ¿Es un código de 6 dígitos?
+    if (/^\d{6}$/.test(raw)) {
+      // Necesitamos el email que se usó para solicitar el OTP
+      const email = localStorage.getItem('otp_email'); // Guárdalo cuando envíes el OTP
+      if (!email) {
+        alert("No encontramos el email asociado. Volvé a solicitar el código.");
+        return;
+      }
+      
+      const { error } = await sb.auth.verifyOtp({
+        email: email,
+        token: raw, // El código de 6 dígitos
+        type: 'email' // o 'magiclink' según tu configuración
+      });
+      
+      if (error) throw error;
+      setLink(""); 
+      setStep("email");
+      localStorage.removeItem('otp_email'); // Limpiamos
+      return;
+    }
+    
+    // B) Si no es un código, procesamos como URL (tu código original)
+    const url = new URL(raw);
+    
+    // B1) PKCE: ?code=...
     const codeParam = url.searchParams.get("code");
     if (codeParam) {
       const { error } = await sb.auth.exchangeCodeForSession(codeParam);
@@ -195,21 +220,41 @@ async function importMagicLink() {
       setLink(""); setStep("email");
       return;
     }
-
-    // B) token_hash + type (magiclink/signup/recovery/invite/email_change)
-    const token_hash = url.searchParams.get("token_hash") || url.searchParams.get("token");
-    const flowType = url.searchParams.get("type");
-    if (token_hash && flowType) {
-      const { error } = await sb.auth.verifyOtp({ token_hash, type: flowType });
-      if (error) throw error;
-      setLink(""); setStep("email");
-      return;
+    
+    // B2) token hash (magic links "verify")
+    const token_hash =
+      url.searchParams.get("token_hash") ||
+      url.searchParams.get("token");
+    let flowType = url.searchParams.get("type");
+    
+    if (token_hash) {
+      const TYPES = flowType
+        ? [flowType]
+        : ["magiclink", "signup", "recovery", "invite", "email_change"];
+      let ok = false, lastErr = null;
+      
+      for (const t of TYPES) {
+        const { error } = await sb.auth.verifyOtp({ token_hash, type: t });
+        if (!error) { ok = true; break; }
+        lastErr = error;
+        
+        if (String(error?.message || "").toLowerCase().includes("expired") ||
+            String(error?.message || "").toLowerCase().includes("used")) {
+          break;
+        }
+      }
+      
+      if (ok) {
+        setLink(""); setStep("email");
+        return;
+      }
+      throw lastErr || new Error("El enlace expiró o es inválido");
     }
-
-    // C) Fragmento con tokens: #access_token=&refresh_token=
-    const hashIndex = link.indexOf("#");
+    
+    // B3) Fragmento con tokens (#access_token=&refresh_token=)
+    const hashIndex = raw.indexOf("#");
     if (hashIndex !== -1) {
-      const q = new URLSearchParams(link.slice(hashIndex + 1));
+      const q = new URLSearchParams(raw.slice(hashIndex + 1));
       const at = q.get("access_token");
       const rt = q.get("refresh_token");
       if (at && rt) {
@@ -219,14 +264,14 @@ async function importMagicLink() {
         return;
       }
     }
-
-    alert("No pude reconocer el enlace. Pegá el link completo del mail.");
+    
+    alert("No reconozco este formato. Pegá un código de 6 dígitos o el link completo.");
   } catch (e) {
-    console.error("Import link error:", e);
-    alert(e && e.message ? e.message : "No pudimos importar el enlace");
+    console.error("Import error:", e);
+    alert(e?.message ?? "No pudimos verificar el código o enlace");
   }
 }
-// --- END: importMagicLink ---
+// --- END: importMagicLink + OTP robusto ---
 
   // Derivados
   const categoriesById = useMemo(() => Object.fromEntries(db.categories.map(c => [c.id, c])), [db.categories]);
