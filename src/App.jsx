@@ -609,31 +609,31 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
-  function exportCSV() {
-    const header = ["id_interno", "id_gasto", "fecha", "monto", "categoria", "nota"];
-    const rows = db.expenses.map((e) => [
-      e.id,
-      getDisplayExpenseId(e),
-      e.date,
-      e.amount,
-      categoriesById[e.categoryId]?.name || e.categoryId,
-      (e.note || "").replaceAll("\n", " "),
-    ]);
+ function exportCSV() {
+  const header = ["id_gasto", "fecha", "monto", "categoria", "nota"];
 
-    const csv = [header, ...rows]
-      .map((r) =>
-        r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")
-      )
-      .join("\n");
+  const rows = db.expenses.map((e) => [
+    getDisplayExpenseId(e),
+    e.date,
+    e.amount,
+    categoriesById[e.categoryId]?.name || e.categoryId,
+    (e.note || "").replaceAll("\n", " "),
+  ]);
 
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `gastos_${filters.month}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }
+  const csv = [header, ...rows]
+    .map((r) =>
+      r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")
+    )
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `gastos_${filters.month}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
 
   function importJSON(file) {
     const reader = new FileReader();
