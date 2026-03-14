@@ -1,5 +1,16 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line, Legend } from "recharts";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  LineChart,
+  Line,
+  Legend,
+} from "recharts";
 import { createClient } from "@supabase/supabase-js";
 
 // --- Gastos — MVP (React) ---
@@ -11,30 +22,102 @@ if (typeof window !== "undefined" && window.location.host !== CANONICAL_HOST) {
 
 // Offline-first (localStorage) + Sync manual en Supabase. Gráficos por categoría y por día.
 
-// ⚠️ Usa tu Project URL y anon key reales.
 const SUPABASE_URL = "https://qugnkfjbfqcihummbaal.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
-const sb = createClient(SUPABASE_URL, SUPABASE_ANON, { auth: { persistSession: true, autoRefreshToken: true } });
+const SUPABASE_ANON =
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
+const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
+  auth: { persistSession: true, autoRefreshToken: true },
+});
 
-// Helper: dominio actual (para debug)
-console.debug("Host actual:", typeof window !== 'undefined' ? window.location.host : '(SSR)');
+console.debug("Host actual:", typeof window !== "undefined" ? window.location.host : "(SSR)");
 
 // Helpers
 const LS_KEY = "gastos_mvp_v1";
-const fmt = (n) => new Intl.NumberFormat(undefined, { style: "currency", currency: "ARS", maximumFractionDigits: 2 }).format(Number(n || 0));
+const fmt = (n) =>
+  new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 2,
+  }).format(Number(n || 0));
+
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const toMonthKey = (d) => (d || todayISO()).slice(0, 7); // YYYY-MM
+
+// ---------- NUEVOS HELPERS PARA ID DE GASTO ----------
+function buildExpenseCode(num) {
+  return `G${String(num).padStart(6, "0")}`;
+}
+
+function getDisplayExpenseId(expense) {
+  return `${expense.expenseId || ""}${expense.modified ? "M" : ""}`;
+}
+
+function extractExpenseNumber(expenseId) {
+  if (!expenseId) return 0;
+  const m = String(expenseId).match(/(\d+)/);
+  return m ? Number(m[1]) : 0;
+}
+
+function getNextExpenseCode(expenses = []) {
+  const maxNum = expenses.reduce((acc, e) => {
+    const n = extractExpenseNumber(e.expenseId);
+    return n > acc ? n : acc;
+  }, 0);
+  return buildExpenseCode(maxNum + 1);
+}
+
+function normalizeDb(rawDb) {
+  const safeDb = rawDb || {};
+  const categories = Array.isArray(safeDb.categories) ? safeDb.categories : [];
+  const expenses = Array.isArray(safeDb.expenses) ? safeDb.expenses : [];
+
+  let maxExisting = expenses.reduce((acc, e) => {
+    const n = extractExpenseNumber(e?.expenseId);
+    return n > acc ? n : acc;
+  }, 0);
+
+  const normalizedExpenses = expenses.map((e) => {
+    const internalId = e?.id || crypto.randomUUID();
+
+    let expenseId = e?.expenseId;
+    if (!expenseId) {
+      maxExisting += 1;
+      expenseId = buildExpenseCode(maxExisting);
+    }
+
+    return {
+      id: internalId,
+      expenseId,
+      modified: Boolean(e?.modified),
+      date: e?.date || todayISO(),
+      amount: Number(e?.amount || 0),
+      categoryId: e?.categoryId || "otros",
+      note: e?.note || "",
+    };
+  });
+
+  return {
+    ...safeDb,
+    categories,
+    expenses: normalizedExpenses,
+  };
+}
 
 function useLocalState(defaultValue) {
   const [state, setState] = useState(() => {
     try {
       const raw = localStorage.getItem(LS_KEY);
-      return raw ? JSON.parse(raw) : defaultValue;
+      const parsed = raw ? JSON.parse(raw) : defaultValue;
+      return normalizeDb(parsed);
     } catch {
-      return defaultValue;
+      return normalizeDb(defaultValue);
     }
   });
-  useEffect(() => { localStorage.setItem(LS_KEY, JSON.stringify(state)); }, [state]);
+
+  useEffect(() => {
+    localStorage.setItem(LS_KEY, JSON.stringify(state));
+  }, [state]);
+
   return [state, setState];
 }
 
@@ -45,17 +128,29 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-function InstallPromptButton(){
+function InstallPromptButton() {
   const [canInstall, setCanInstall] = React.useState(false);
   const deferredRef = React.useRef(null);
-  React.useEffect(()=>{
-    const h = (e)=>{ e.preventDefault(); deferredRef.current = e; setCanInstall(true); };
+
+  React.useEffect(() => {
+    const h = (e) => {
+      e.preventDefault();
+      deferredRef.current = e;
+      setCanInstall(true);
+    };
     window.addEventListener("beforeinstallprompt", h);
-    return ()=> window.removeEventListener("beforeinstallprompt", h);
-  },[]);
-  if(!canInstall) return null;
+    return () => window.removeEventListener("beforeinstallprompt", h);
+  }, []);
+
+  if (!canInstall) return null;
+
   return (
-    <button onClick={()=>deferredRef.current?.prompt()} className="mt-4 px-3 py-2 rounded-xl bg-white border">Instalar app</button>
+    <button
+      onClick={() => deferredRef.current?.prompt()}
+      className="mt-4 px-3 py-2 rounded-xl bg-white border"
+    >
+      Instalar app
+    </button>
   );
 }
 
@@ -98,13 +193,29 @@ export default function App() {
       { id: "transporte", name: "Transporte" },
       { id: "vacaciones", name: "Vacaciones" },
     ],
-    expenses: [], // {id, date, amount, categoryId, note}
+    expenses: [], // {id, expenseId, modified, date, amount, categoryId, note}
   });
 
-  const [filters, setFilters] = useState({ month: toMonthKey(todayISO()), categoryId: "all", q: "" });
-  const [form, setForm] = useState({ date: todayISO(), amount: "", categoryId: "almuerzo-trabajo", note: "" });
+  const [filters, setFilters] = useState({
+    month: toMonthKey(todayISO()),
+    categoryId: "all",
+    q: "",
+  });
+
+  const emptyForm = {
+    date: todayISO(),
+    amount: "",
+    categoryId: "almuerzo-trabajo",
+    note: "",
+  };
+
+  const [form, setForm] = useState(emptyForm);
+  const [editingRecordId, setEditingRecordId] = useState(null);
+
   const amountRef = useRef(null);
-  useEffect(() => { amountRef.current?.focus(); }, []);
+  useEffect(() => {
+    amountRef.current?.focus();
+  }, []);
 
   // Auth & sync state
   const [email, setEmail] = useState("");
@@ -125,13 +236,15 @@ export default function App() {
         const access_token = params.get("access_token");
         const refresh_token = params.get("refresh_token");
         if (access_token && refresh_token) {
-          sb.auth.setSession({ access_token, refresh_token }).then(({ data, error }) => {
-            if (!error && data?.session?.user?.id) {
-              setUserId(data.session.user.id);
-              const { origin, pathname, search } = window.location;
-              window.history.replaceState({}, document.title, origin + pathname + search);
-            }
-          });
+          sb.auth
+            .setSession({ access_token, refresh_token })
+            .then(({ data, error }) => {
+              if (!error && data?.session?.user?.id) {
+                setUserId(data.session.user.id);
+                const { origin, pathname, search } = window.location;
+                window.history.replaceState({}, document.title, origin + pathname + search);
+              }
+            });
         }
       }
     } catch {}
@@ -142,19 +255,23 @@ export default function App() {
       const { data } = await sb.auth.getSession();
       setUserId(data.session?.user?.id || null);
     })();
-    const { data: sub } = sb.auth.onAuthStateChange((_e, session) => setUserId(session?.user?.id || null));
+
+    const { data: sub } = sb.auth.onAuthStateChange((_e, session) =>
+      setUserId(session?.user?.id || null)
+    );
+
     return () => sub.subscription?.unsubscribe?.();
   }, []);
 
   // === OTP (no Safari) ===
   async function sendCode() {
     if (!email) return alert("Ingresá un email válido");
+
     try {
       const { error } = await sb.auth.signInWithOtp({
         email,
         options: {
-          shouldCreateUser: true, // crea usuario si no existe
-          // ¡sin emailRedirectTo! → evita magic link por redirección
+          shouldCreateUser: true,
         },
       });
       if (error) throw error;
@@ -169,8 +286,13 @@ export default function App() {
   async function verifyCode() {
     if (!email) return alert("Falta el e-mail");
     if (code.trim().length !== 6) return alert("El código debe tener 6 dígitos");
+
     try {
-      const { error } = await sb.auth.verifyOtp({ email, token: code.trim(), type: "email" });
+      const { error } = await sb.auth.verifyOtp({
+        email,
+        token: code.trim(),
+        type: "email",
+      });
       if (error) throw error;
       setCode("");
       setStep("email");
@@ -180,193 +302,336 @@ export default function App() {
     }
   }
 
-// --- START: importMagicLink robusto ---
-async function importMagicLink() {
-  if (!link) { alert("Pegá el enlace completo del mail"); return; }
-
-  try {
-    // Normalizamos espacios/”smart quotes”
-    const raw = link.trim().replace(/\u201C|\u201D/g, '"');
-
-    // Si vino envuelto por un tracker y viste un redireccionamiento,
-    // asegurate de tener la URL final que empieza en https://<project>.supabase.co/...
-    const url = new URL(raw);
-
-    // A) PKCE: ?code=...
-    const codeParam = url.searchParams.get("code");
-    if (codeParam) {
-      const { error } = await sb.auth.exchangeCodeForSession(codeParam);
-      if (error) throw error;
-      setLink(""); setStep("email");
+  async function importMagicLink() {
+    if (!link) {
+      alert("Pegá el enlace completo del mail");
       return;
     }
 
-    // B) token hash (magic links “verify”):
-    //    ?token_hash=...&type=magiclink (o signup/recovery/invite/email_change)
-    const token_hash =
-      url.searchParams.get("token_hash") ||
-      url.searchParams.get("token"); // por compatibilidad
-    let flowType = url.searchParams.get("type");
+    try {
+      const raw = link.trim().replace(/\u201C|\u201D/g, '"');
+      const url = new URL(raw);
 
-    if (token_hash) {
-      // Si el mail no trae 'type' o falla, probamos todos los tipos
-      const TYPES = flowType
-        ? [flowType]
-        : ["magiclink", "signup", "recovery", "invite", "email_change"];
+      const codeParam = url.searchParams.get("code");
+      if (codeParam) {
+        const { error } = await sb.auth.exchangeCodeForSession(codeParam);
+        if (error) throw error;
+        setLink("");
+        setStep("email");
+        return;
+      }
 
-      let ok = false, lastErr = null;
-      for (const t of TYPES) {
-        const { error } = await sb.auth.verifyOtp({ token_hash, type: t });
-        if (!error) { ok = true; break; }
-        lastErr = error;
-        // Si el error es “expired/consumed”, no tiene sentido seguir.
-        if (String(error?.message || "").toLowerCase().includes("expired") ||
-            String(error?.message || "").toLowerCase().includes("used")) {
-          break;
+      const token_hash =
+        url.searchParams.get("token_hash") || url.searchParams.get("token");
+      let flowType = url.searchParams.get("type");
+
+      if (token_hash) {
+        const TYPES = flowType
+          ? [flowType]
+          : ["magiclink", "signup", "recovery", "invite", "email_change"];
+
+        let ok = false;
+        let lastErr = null;
+
+        for (const t of TYPES) {
+          const { error } = await sb.auth.verifyOtp({ token_hash, type: t });
+          if (!error) {
+            ok = true;
+            break;
+          }
+          lastErr = error;
+
+          if (
+            String(error?.message || "").toLowerCase().includes("expired") ||
+            String(error?.message || "").toLowerCase().includes("used")
+          ) {
+            break;
+          }
+        }
+
+        if (ok) {
+          setLink("");
+          setStep("email");
+          return;
+        }
+
+        throw lastErr || new Error("Email link is invalid or has expired");
+      }
+
+      const hashIndex = raw.indexOf("#");
+      if (hashIndex !== -1) {
+        const q = new URLSearchParams(raw.slice(hashIndex + 1));
+        const at = q.get("access_token");
+        const rt = q.get("refresh_token");
+        if (at && rt) {
+          const { error } = await sb.auth.setSession({
+            access_token: at,
+            refresh_token: rt,
+          });
+          if (error) throw error;
+          setLink("");
+          setStep("email");
+          return;
         }
       }
-      if (ok) {
-        setLink(""); setStep("email");
-        return;
-      }
-      throw lastErr || new Error("Email link is invalid or has expired");
-    }
 
-    // C) Fragmento con tokens (#access_token=&refresh_token=)
-    const hashIndex = raw.indexOf("#");
-    if (hashIndex !== -1) {
-      const q = new URLSearchParams(raw.slice(hashIndex + 1));
-      const at = q.get("access_token");
-      const rt = q.get("refresh_token");
-      if (at && rt) {
-        const { error } = await sb.auth.setSession({ access_token: at, refresh_token: rt });
-        if (error) throw error;
-        setLink(""); setStep("email");
-        return;
-      }
+      alert(
+        "No pude reconocer el enlace. Pegá el link final de Supabase (https://<project>.supabase.co/auth/v1/verify?...)."
+      );
+    } catch (e) {
+      console.error("Import link error:", e);
+      alert(e?.message ?? "No pudimos importar el enlace");
     }
-
-    alert("No pude reconocer el enlace. Pegá el link final de Supabase (https://<project>.supabase.co/auth/v1/verify?...).");
-  } catch (e) {
-    console.error("Import link error:", e);
-    alert(e?.message ?? "No pudimos importar el enlace");
   }
-}
-// --- END: importMagicLink robusto ---
-
 
   // Derivados
-  const categoriesById = useMemo(() => Object.fromEntries(db.categories.map(c => [c.id, c])), [db.categories]);
+  const categoriesById = useMemo(
+    () => Object.fromEntries(db.categories.map((c) => [c.id, c])),
+    [db.categories]
+  );
 
   const expensesFiltered = useMemo(() => {
     return db.expenses
-      .filter(e => {
-        if (!e || !e.date) return false; // proteger registros incompletos
+      .filter((e) => {
+        if (!e || !e.date) return false;
         const inMonth = toMonthKey(e.date) === filters.month;
         const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
-        const inQ = !filters.q || (e.note?.toLowerCase().includes(filters.q.toLowerCase()));
+        const q = filters.q.toLowerCase();
+
+        const inQ =
+          !filters.q ||
+          (e.note || "").toLowerCase().includes(q) ||
+          (e.expenseId || "").toLowerCase().includes(q) ||
+          getDisplayExpenseId(e).toLowerCase().includes(q);
+
         return inMonth && inCat && inQ;
       })
-      .sort((a, b) => (a.date < b.date ? 1 : -1));
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
+      });
   }, [db.expenses, filters]);
 
   const totals = useMemo(() => {
-    const monthTotal = expensesFiltered.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+    const monthTotal = expensesFiltered.reduce(
+      (acc, e) => acc + Number(e.amount || 0),
+      0
+    );
+
     const byCat = {};
     for (const e of expensesFiltered) {
       byCat[e.categoryId] = (byCat[e.categoryId] || 0) + Number(e.amount || 0);
     }
+
     return { monthTotal, byCat };
   }, [expensesFiltered]);
 
   const dataByCategory = useMemo(() => {
-    return Object.entries(totals.byCat).map(([catId, amt]) => ({
-      name: categoriesById[catId]?.name || catId,
-      amount: Number(amt || 0),
-    })).sort((a,b)=>b.amount-a.amount);
+    return Object.entries(totals.byCat)
+      .map(([catId, amt]) => ({
+        name: categoriesById[catId]?.name || catId,
+        amount: Number(amt || 0),
+      }))
+      .sort((a, b) => b.amount - a.amount);
   }, [totals.byCat, categoriesById]);
 
   const dataByDay = useMemo(() => {
     const [y, m] = filters.month.split("-").map(Number);
     const lastDay = new Date(y, m, 0).getDate();
-    const base = Array.from({ length: lastDay }, (_, i) => ({ day: i + 1, amount: 0 }));
+    const base = Array.from({ length: lastDay }, (_, i) => ({
+      day: i + 1,
+      amount: 0,
+    }));
 
     for (const e of db.expenses) {
-      if (!e?.date) continue;                                  // sin fecha -> ignoro
-      if (toMonthKey(e.date) !== filters.month) continue;      // otro mes -> ignoro
+      if (!e?.date) continue;
+      if (toMonthKey(e.date) !== filters.month) continue;
       const t = new Date(e.date).getTime();
-      if (!Number.isFinite(t)) continue;                       // fecha inválida -> ignoro
+      if (!Number.isFinite(t)) continue;
       const day = new Date(e.date).getDate();
       if (day >= 1 && day <= lastDay) {
         base[day - 1].amount += Number(e.amount ?? 0) || 0;
       }
     }
+
     return base;
   }, [db.expenses, filters.month]);
 
-  // Acciones
-  function addExpense(ev) {
+  // ---------- ACCIONES NUEVAS ----------
+  function resetForm() {
+    setForm({
+      date: todayISO(),
+      amount: "",
+      categoryId: db.categories[0]?.id || "otros",
+      note: "",
+    });
+    setEditingRecordId(null);
+  }
+
+  function handleSubmitExpense(ev) {
     ev.preventDefault();
 
     const date = (form.date || "").trim();
     const timeOk = date && Number.isFinite(new Date(date).getTime());
-    if (!timeOk) { alert("Elegí una fecha válida (AAAA-MM-DD)"); return; }
+    if (!timeOk) {
+      alert("Elegí una fecha válida (AAAA-MM-DD)");
+      return;
+    }
 
     const amt = Number(String(form.amount ?? "").replace(",", "."));
-    if (!Number.isFinite(amt) || amt <= 0) { alert("Ingresá un monto válido (>0)"); return; }
+    if (!Number.isFinite(amt) || amt <= 0) {
+      alert("Ingresá un monto válido (>0)");
+      return;
+    }
 
-    const id = crypto.randomUUID();
-    setDb(prev => ({
-      ...prev,
-      expenses: [
-        ...prev.expenses,
-        { id, date, amount: amt, categoryId: form.categoryId, note: (form.note || "").trim() }
-      ],
-    }));
+    if (!form.categoryId) {
+      alert("Elegí una categoría");
+      return;
+    }
 
-    setForm(f => ({ ...f, amount: "", note: "" }));
+    if (editingRecordId) {
+      setDb((prev) => ({
+        ...prev,
+        expenses: prev.expenses.map((e) =>
+          e.id === editingRecordId
+            ? {
+                ...e,
+                date,
+                amount: amt,
+                categoryId: form.categoryId,
+                note: (form.note || "").trim(),
+                modified: true,
+              }
+            : e
+        ),
+      }));
+    } else {
+      const nextExpenseId = getNextExpenseCode(db.expenses);
+
+      setDb((prev) => ({
+        ...prev,
+        expenses: [
+          ...prev.expenses,
+          {
+            id: crypto.randomUUID(),
+            expenseId: nextExpenseId,
+            modified: false,
+            date,
+            amount: amt,
+            categoryId: form.categoryId,
+            note: (form.note || "").trim(),
+          },
+        ],
+      }));
+    }
+
+    resetForm();
     amountRef.current?.focus();
   }
+
   function removeExpense(id) {
     if (!confirm("¿Eliminar gasto?")) return;
-    setDb(prev => ({ ...prev, expenses: prev.expenses.filter(e => e.id !== id) }));
+    setDb((prev) => ({
+      ...prev,
+      expenses: prev.expenses.filter((e) => e.id !== id),
+    }));
+    if (editingRecordId === id) {
+      resetForm();
+    }
+  }
+
+  function editExpense(expense) {
+    setForm({
+      date: expense.date || todayISO(),
+      amount: String(expense.amount ?? ""),
+      categoryId: expense.categoryId || db.categories[0]?.id || "otros",
+      note: expense.note || "",
+    });
+    setEditingRecordId(expense.id);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => amountRef.current?.focus(), 50);
+  }
+
+  function duplicateExpense(expense) {
+    setForm({
+      date: expense.date || todayISO(),
+      amount: String(expense.amount ?? ""),
+      categoryId: expense.categoryId || db.categories[0]?.id || "otros",
+      note: expense.note || "",
+    });
+    setEditingRecordId(null);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    setTimeout(() => amountRef.current?.focus(), 50);
   }
 
   function addCategory() {
     const name = prompt("Nombre de la nueva categoría:")?.trim();
     if (!name) return;
+
     const id = name
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")   // quita diacríticos
+      .replace(/[\u0300-\u036f]/g, "")
       .replace(/\s+/g, "-")
       .replace(/[^a-z0-9-]/g, "");
-    if (db.categories.some(c => c.id === id)) return alert("Ya existe una categoría con ese nombre");
-    setDb(prev => ({ ...prev, categories: [...prev.categories, { id, name }] }));
+
+    if (db.categories.some((c) => c.id === id)) {
+      return alert("Ya existe una categoría con ese nombre");
+    }
+
+    setDb((prev) => ({
+      ...prev,
+      categories: [...prev.categories, { id, name }],
+    }));
   }
 
   function renameCategory(catId) {
     const current = categoriesById[catId];
     const name = prompt("Nuevo nombre:", current?.name) || current?.name;
-    setDb(prev => ({ ...prev, categories: prev.categories.map(c => c.id === catId ? { ...c, name } : c) }));
+
+    setDb((prev) => ({
+      ...prev,
+      categories: prev.categories.map((c) =>
+        c.id === catId ? { ...c, name } : c
+      ),
+    }));
   }
 
   function exportJSON() {
-    const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
+    const blob = new Blob([JSON.stringify(db, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `gastos_${filters.month}.json`; a.click();
+    a.href = url;
+    a.download = `gastos_${filters.month}.json`;
+    a.click();
     URL.revokeObjectURL(url);
   }
 
   function exportCSV() {
-    const header = ["id", "date", "amount", "category", "note"]; 
-    const rows = db.expenses.map(e => [e.id, e.date, e.amount, categoriesById[e.categoryId]?.name || e.categoryId, (e.note||"").replaceAll("\n"," ")]);
-    const csv = [header, ...rows].map(r => r.map(x => `"${String(x).replaceAll('"', '""')}"`).join(",")).join("\n");
+    const header = ["id_interno", "id_gasto", "fecha", "monto", "categoria", "nota"];
+    const rows = db.expenses.map((e) => [
+      e.id,
+      getDisplayExpenseId(e),
+      e.date,
+      e.amount,
+      categoriesById[e.categoryId]?.name || e.categoryId,
+      (e.note || "").replaceAll("\n", " "),
+    ]);
+
+    const csv = [header, ...rows]
+      .map((r) =>
+        r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")
+      )
+      .join("\n");
+
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = `gastos_${filters.month}.csv`; a.click();
+    a.href = url;
+    a.download = `gastos_${filters.month}.csv`;
+    a.click();
     URL.revokeObjectURL(url);
   }
 
@@ -375,52 +640,87 @@ async function importMagicLink() {
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result));
-        if (!parsed?.expenses || !parsed?.categories) throw new Error("Formato inválido");
-        setDb(parsed);
+        if (!parsed?.expenses || !parsed?.categories) {
+          throw new Error("Formato inválido");
+        }
+        setDb(normalizeDb(parsed));
         alert("Datos importados");
       } catch (e) {
-        alert("No pude importar el archivo. Revisa el formato JSON.");
+        alert("No pude importar el archivo. Revisá el formato JSON.");
       }
     };
     reader.readAsText(file);
   }
 
-  // --- Sync manual (fuera de useEffect)
+  // --- Sync manual
   async function doPull() {
     if (!userId) return alert("Iniciá sesión para sincronizar");
-    const remote = await sb.from("gastos_snapshots").select("payload").eq("user_id", userId).single();
+
+    const remote = await sb
+      .from("gastos_snapshots")
+      .select("payload")
+      .eq("user_id", userId)
+      .single();
+
     if (remote.error && remote.error.code !== "PGRST116") {
       alert("Pull error: " + remote.error.message);
       return;
     }
+
     if (remote.data?.payload) {
-      setDb(remote.data.payload);
+      setDb(normalizeDb(remote.data.payload));
       setLastSync(new Date());
     } else {
       alert("No hay datos remotos aún");
     }
   }
+
   async function doPush() {
     if (!userId) return alert("Iniciá sesión para sincronizar");
-    const { error } = await sb.from("gastos_snapshots").upsert({ user_id: userId, payload: db, updated_at: new Date().toISOString() });
+
+    const { error } = await sb.from("gastos_snapshots").upsert({
+      user_id: userId,
+      payload: db,
+      updated_at: new Date().toISOString(),
+    });
+
     if (error) alert("Push error: " + error.message);
     else setLastSync(new Date());
   }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 p-4 md:p-8">
-      <div className="max-w-5xl mx-auto space-y-6">
+      <div className="max-w-6xl mx-auto space-y-6">
         <header className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">Gastos — MVP</h1>
-            <p className="text-sm text-slate-600">Offline • Export/Import • Sync manual • Moneda: {db.currency}</p>
+            <p className="text-sm text-slate-600">
+              Offline • Export/Import • Sync manual • Moneda: {db.currency}
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button onClick={exportCSV} className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md">Exportar CSV</button>
-            <button onClick={exportJSON} className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md">Exportar JSON</button>
+            <button
+              onClick={exportCSV}
+              className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md"
+            >
+              Exportar CSV
+            </button>
+            <button
+              onClick={exportJSON}
+              className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md"
+            >
+              Exportar JSON
+            </button>
             <label className="px-3 py-2 rounded-xl bg-white shadow hover:shadow-md cursor-pointer">
               Importar JSON
-              <input type="file" accept="application/json" className="hidden" onChange={(e)=>e.target.files?.[0] && importJSON(e.target.files[0])} />
+              <input
+                type="file"
+                accept="application/json"
+                className="hidden"
+                onChange={(e) =>
+                  e.target.files?.[0] && importJSON(e.target.files[0])
+                }
+              />
             </label>
           </div>
         </header>
@@ -429,7 +729,9 @@ async function importMagicLink() {
         <section className="bg-white rounded-2xl shadow p-4 flex flex-col md:flex-row md:items-end md:justify-between gap-3">
           <div className="flex items-center gap-2">
             {userId ? (
-              <div className="text-sm">Conectado · <span className="font-mono">{userId.slice(0,8)}…</span></div>
+              <div className="text-sm">
+                Conectado · <span className="font-mono">{userId.slice(0, 8)}…</span>
+              </div>
             ) : (
               <>
                 {step === "email" && (
@@ -440,12 +742,22 @@ async function importMagicLink() {
                         className="border rounded-xl p-2"
                         placeholder="tu@email"
                         value={email}
-                        onChange={(e)=>setEmail(e.target.value)}
+                        onChange={(e) => setEmail(e.target.value)}
                       />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border">Enviar código</button>
-                      <button onClick={()=>setStep("link")} className="px-3 py-2 rounded-xl bg-white border">Tengo un link</button>
+                      <button
+                        onClick={sendCode}
+                        className="px-3 py-2 rounded-xl bg-white border"
+                      >
+                        Enviar código
+                      </button>
+                      <button
+                        onClick={() => setStep("link")}
+                        className="px-3 py-2 rounded-xl bg-white border"
+                      >
+                        Tengo un link
+                      </button>
                     </div>
                   </div>
                 )}
@@ -461,13 +773,39 @@ async function importMagicLink() {
                         className="border rounded-xl p-2 tracking-widest text-center"
                         placeholder="••••••"
                         value={code}
-                        onChange={(e)=>setCode(e.target.value.replace(/\D/g, ""))}
+                        onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
                       />
                     </div>
-                    <button onClick={verifyCode} className="px-3 py-2 rounded-xl bg-white border">Confirmar</button>
-                    <button onClick={sendCode} className="px-3 py-2 rounded-xl bg-white border" title="Reenviar código">Reenviar</button>
-                    <button onClick={()=>{ setStep("email"); setCode(""); }} className="px-3 py-2 rounded-xl bg-white border">Cambiar e-mail</button>
-                    <button onClick={()=>{ setStep("link"); }} className="px-3 py-2 rounded-xl bg-white border">Tengo un link</button>
+                    <button
+                      onClick={verifyCode}
+                      className="px-3 py-2 rounded-xl bg-white border"
+                    >
+                      Confirmar
+                    </button>
+                    <button
+                      onClick={sendCode}
+                      className="px-3 py-2 rounded-xl bg-white border"
+                      title="Reenviar código"
+                    >
+                      Reenviar
+                    </button>
+                    <button
+                      onClick={() => {
+                        setStep("email");
+                        setCode("");
+                      }}
+                      className="px-3 py-2 rounded-xl bg-white border"
+                    >
+                      Cambiar e-mail
+                    </button>
+                    <button
+                      onClick={() => {
+                        setStep("link");
+                      }}
+                      className="px-3 py-2 rounded-xl bg-white border"
+                    >
+                      Tengo un link
+                    </button>
                   </div>
                 )}
 
@@ -479,20 +817,40 @@ async function importMagicLink() {
                         className="border rounded-xl p-2"
                         placeholder="Pegá acá el enlace completo del mail"
                         value={link}
-                        onChange={(e)=>setLink(e.target.value)}
+                        onChange={(e) => setLink(e.target.value)}
                       />
                     </div>
-                    <button onClick={importMagicLink} className="px-3 py-2 rounded-xl bg-white border">Importar link</button>
-                    <button onClick={()=>{ setStep("email"); setLink(""); }} className="px-3 py-2 rounded-xl bg-white border">Volver</button>
+                    <button
+                      onClick={importMagicLink}
+                      className="px-3 py-2 rounded-xl bg-white border"
+                    >
+                      Importar link
+                    </button>
+                    <button
+                      onClick={() => {
+                        setStep("email");
+                        setLink("");
+                      }}
+                      className="px-3 py-2 rounded-xl bg-white border"
+                    >
+                      Volver
+                    </button>
                   </div>
                 )}
               </>
             )}
           </div>
+
           <div className="flex items-center gap-2">
-            <button onClick={doPull} className="px-3 py-2 rounded-xl bg-white border">Pull</button>
-            <button onClick={doPush} className="px-3 py-2 rounded-xl bg-white border">Push</button>
-            <div className="text-xs text-slate-500">Última sync: {lastSync ? lastSync.toLocaleString() : "—"}</div>
+            <button onClick={doPull} className="px-3 py-2 rounded-xl bg-white border">
+              Pull
+            </button>
+            <button onClick={doPush} className="px-3 py-2 rounded-xl bg-white border">
+              Push
+            </button>
+            <div className="text-xs text-slate-500">
+              Última sync: {lastSync ? lastSync.toLocaleString() : "—"}
+            </div>
           </div>
         </section>
 
@@ -500,18 +858,36 @@ async function importMagicLink() {
         <section className="bg-white rounded-2xl shadow p-4 grid gap-3 md:grid-cols-4">
           <div className="flex flex-col">
             <label className="text-sm">Mes</label>
-            <input type="month" value={filters.month} onChange={(e)=>setFilters(f=>({...f, month: e.target.value}))} className="rounded-xl border p-2" />
+            <input
+              type="month"
+              value={filters.month}
+              onChange={(e) => setFilters((f) => ({ ...f, month: e.target.value }))}
+              className="rounded-xl border p-2"
+            />
           </div>
           <div className="flex flex-col">
             <label className="text-sm">Categoría</label>
-            <select value={filters.categoryId} onChange={(e)=>setFilters(f=>({...f, categoryId: e.target.value}))} className="rounded-xl border p-2">
+            <select
+              value={filters.categoryId}
+              onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))}
+              className="rounded-xl border p-2"
+            >
               <option value="all">Todas</option>
-              {db.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {db.categories.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex flex-col md:col-span-2">
-            <label className="text-sm">Buscar nota</label>
-            <input value={filters.q} onChange={(e)=>setFilters(f=>({...f, q: e.target.value}))} placeholder="super, nafta, etc." className="rounded-xl border p-2" />
+            <label className="text-sm">Buscar nota o ID</label>
+            <input
+              value={filters.q}
+              onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
+              placeholder="super, nafta, G000015, etc."
+              className="rounded-xl border p-2"
+            />
           </div>
         </section>
 
@@ -521,12 +897,16 @@ async function importMagicLink() {
             <div className="text-xs text-slate-500">Total del mes</div>
             <div className="text-xl font-bold">{fmt(totals.monthTotal)}</div>
           </div>
-          {Object.entries(totals.byCat).slice(0,3).map(([catId, amt]) => (
-            <div className="p-3 rounded-xl border" key={catId}>
-              <div className="text-xs text-slate-500">{categoriesById[catId]?.name || catId}</div>
-              <div className="text-lg font-semibold">{fmt(amt)}</div>
-            </div>
-          ))}
+          {Object.entries(totals.byCat)
+            .slice(0, 3)
+            .map(([catId, amt]) => (
+              <div className="p-3 rounded-xl border" key={catId}>
+                <div className="text-xs text-slate-500">
+                  {categoriesById[catId]?.name || catId}
+                </div>
+                <div className="text-lg font-semibold">{fmt(amt)}</div>
+              </div>
+            ))}
         </section>
 
         {/* Gráficos */}
@@ -537,21 +917,22 @@ async function importMagicLink() {
               <BarChart data={dataByCategory} margin={{ top: 8, right: 16, left: 0, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="name" interval={0} angle={-25} textAnchor="end" height={60} />
-                <YAxis tickFormatter={(v)=>new Intl.NumberFormat().format(v)} />
-                <Tooltip formatter={(v)=>fmt(v)} />
+                <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
+                <Tooltip formatter={(v) => fmt(v)} />
                 <Legend />
                 <Bar dataKey="amount" name="Monto" />
               </BarChart>
             </ResponsiveContainer>
           </div>
+
           <div className="h-72">
             <h3 className="font-semibold mb-2">Gasto por día del mes ({filters.month})</h3>
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={dataByDay} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="day" />
-                <YAxis tickFormatter={(v)=>new Intl.NumberFormat().format(v)} />
-                <Tooltip formatter={(v)=>fmt(v)} labelFormatter={(l)=>`Día ${l}`} />
+                <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
+                <Tooltip formatter={(v) => fmt(v)} labelFormatter={(l) => `Día ${l}`} />
                 <Legend />
                 <Line type="monotone" dataKey="amount" name="Monto" dot={false} />
               </LineChart>
@@ -559,85 +940,209 @@ async function importMagicLink() {
           </div>
         </section>
 
-        {/* Alta de gasto */}
+        {/* Alta / Edición de gasto */}
         <section className="bg-white rounded-2xl shadow p-4">
-          <form onSubmit={addExpense} className="grid md:grid-cols-5 gap-3 items-end">
+          <div className="mb-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+            <h2 className="font-semibold">
+              {editingRecordId ? "Editar gasto" : "Agregar gasto"}
+            </h2>
+
+            {editingRecordId && (
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-1">
+                  Estás editando un gasto existente
+                </span>
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="px-3 py-2 rounded-xl bg-white border"
+                >
+                  Cancelar edición
+                </button>
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={handleSubmitExpense} className="grid md:grid-cols-5 gap-3 items-end">
             <div className="flex flex-col">
               <label className="text-sm">Fecha</label>
-              <input type="date" value={form.date} onChange={(e)=>setForm(f=>({...f, date: e.target.value}))} className="rounded-xl border p-2" />
+              <input
+                type="date"
+                value={form.date}
+                onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
+                className="rounded-xl border p-2"
+              />
             </div>
+
             <div className="flex flex-col">
               <label className="text-sm">Monto ({db.currency})</label>
-              <input ref={amountRef} inputMode="decimal" placeholder="0,00" value={form.amount} onChange={(e)=>setForm(f=>({...f, amount: e.target.value}))} className="rounded-xl border p-2" />
+              <input
+                ref={amountRef}
+                inputMode="decimal"
+                placeholder="0,00"
+                value={form.amount}
+                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                className="rounded-xl border p-2"
+              />
             </div>
+
             <div className="flex flex-col">
               <label className="text-sm">Categoría</label>
               <div className="flex gap-2">
-                <select value={form.categoryId} onChange={(e)=>setForm(f=>({...f, categoryId: e.target.value}))} className="rounded-xl border p-2 w-full">
-                  {db.categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                <select
+                  value={form.categoryId}
+                  onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+                  className="rounded-xl border p-2 w-full"
+                >
+                  {db.categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
                 </select>
-                <button type="button" onClick={addCategory} title="Agregar categoría" className="px-3 rounded-xl border">+</button>
+                <button
+                  type="button"
+                  onClick={addCategory}
+                  title="Agregar categoría"
+                  className="px-3 rounded-xl border"
+                >
+                  +
+                </button>
               </div>
             </div>
+
             <div className="flex flex-col md:col-span-2">
               <label className="text-sm">Nota</label>
-              <input value={form.note} onChange={(e)=>setForm(f=>({...f, note: e.target.value}))} placeholder="Detalle opcional" className="rounded-xl border p-2" />
+              <input
+                value={form.note}
+                onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="Detalle opcional"
+                className="rounded-xl border p-2"
+              />
             </div>
-            <div className="md:col-span-5 flex gap-2">
-              <button type="submit" className="px-4 py-2 rounded-2xl bg-slate-900 text-white hover:opacity-90">Agregar</button>
-              <button type="button" onClick={()=>setDb(prev=>({...prev, expenses: []}))} className="px-4 py-2 rounded-2xl bg-white border">Borrar todo</button>
+
+            <div className="md:col-span-5 flex gap-2 flex-wrap">
+              <button
+                type="submit"
+                className="px-4 py-2 rounded-2xl bg-slate-900 text-white hover:opacity-90"
+              >
+                {editingRecordId ? "Guardar cambios" : "Agregar"}
+              </button>
+
+              <button
+                type="button"
+                onClick={resetForm}
+                className="px-4 py-2 rounded-2xl bg-white border"
+              >
+                Limpiar formulario
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!confirm("¿Borrar todos los gastos?")) return;
+                  setDb((prev) => ({ ...prev, expenses: [] }));
+                  resetForm();
+                }}
+                className="px-4 py-2 rounded-2xl bg-white border"
+              >
+                Borrar todo
+              </button>
             </div>
           </form>
         </section>
 
         {/* Lista de gastos */}
         <section className="bg-white rounded-2xl shadow overflow-hidden">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-100">
-              <tr>
-                <th className="text-left p-2">Fecha</th>
-                <th className="text-left p-2">Categoría</th>
-                <th className="text-right p-2">Monto</th>
-                <th className="text-left p-2">Nota</th>
-                <th className="p-2"/>
-              </tr>
-            </thead>
-            <tbody>
-              {expensesFiltered.length === 0 && (
-                <tr><td colSpan={5} className="p-4 text-center text-slate-500">Sin gastos en el período/criterios</td></tr>
-              )}
-              {expensesFiltered.map(e => (
-                <tr key={e.id} className="border-t">
-                  <td className="p-2 whitespace-nowrap">{e.date}</td>
-                  <td className="p-2">{categoriesById[e.categoryId]?.name || e.categoryId}</td>
-                  <td className="p-2 text-right font-medium">{fmt(e.amount)}</td>
-                  <td className="p-2">{e.note}</td>
-                  <td className="p-2 text-right">
-                    <button onClick={()=>removeExpense(e.id)} className="text-red-600">Eliminar</button>
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead className="bg-slate-100">
+                <tr>
+                  <th className="text-left p-2">ID gasto</th>
+                  <th className="text-left p-2">Fecha</th>
+                  <th className="text-left p-2">Categoría</th>
+                  <th className="text-right p-2">Monto</th>
+                  <th className="text-left p-2">Nota</th>
+                  <th className="text-right p-2">Acciones</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {expensesFiltered.length === 0 && (
+                  <tr>
+                    <td colSpan={6} className="p-4 text-center text-slate-500">
+                      Sin gastos en el período/criterios
+                    </td>
+                  </tr>
+                )}
+
+                {expensesFiltered.map((e) => (
+                  <tr key={e.id} className="border-t">
+                    <td className="p-2 whitespace-nowrap font-mono">
+                      {getDisplayExpenseId(e)}
+                    </td>
+                    <td className="p-2 whitespace-nowrap">{e.date}</td>
+                    <td className="p-2">
+                      {categoriesById[e.categoryId]?.name || e.categoryId}
+                    </td>
+                    <td className="p-2 text-right font-medium">{fmt(e.amount)}</td>
+                    <td className="p-2">{e.note}</td>
+                    <td className="p-2 text-right">
+                      <div className="flex justify-end gap-3 whitespace-nowrap">
+                        <button
+                          onClick={() => editExpense(e)}
+                          className="text-slate-700 hover:underline"
+                        >
+                          Editar
+                        </button>
+                        <button
+                          onClick={() => duplicateExpense(e)}
+                          className="text-blue-700 hover:underline"
+                        >
+                          Duplicar
+                        </button>
+                        <button
+                          onClick={() => removeExpense(e.id)}
+                          className="text-red-600 hover:underline"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
 
         {/* Categorías */}
         <section className="bg-white rounded-2xl shadow p-4">
           <div className="flex items-center justify-between mb-2">
             <h2 className="font-semibold">Categorías</h2>
-            <button onClick={addCategory} className="px-3 py-1 rounded-xl border">Agregar</button>
+            <button onClick={addCategory} className="px-3 py-1 rounded-xl border">
+              Agregar
+            </button>
           </div>
+
           <div className="grid md:grid-cols-3 gap-2">
-            {db.categories.map(c => (
+            {db.categories.map((c) => (
               <div key={c.id} className="flex items-center justify-between border rounded-xl p-2">
                 <div>{c.name}</div>
                 <div className="flex gap-2">
-                  <button onClick={()=>renameCategory(c.id)} className="text-slate-700">Renombrar</button>
+                  <button
+                    onClick={() => renameCategory(c.id)}
+                    className="text-slate-700"
+                  >
+                    Renombrar
+                  </button>
                 </div>
               </div>
             ))}
           </div>
-          <p className="text-xs text-slate-500 mt-2">Consejo: mantené pocas categorías y usá la nota para el detalle.</p>
+
+          <p className="text-xs text-slate-500 mt-2">
+            Consejo: mantené pocas categorías y usá la nota para el detalle.
+          </p>
         </section>
 
         {/* Footer */}
