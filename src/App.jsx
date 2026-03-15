@@ -422,27 +422,27 @@ const [selectedDay, setSelectedDay] = useState(null);
   );
 
   const expensesFiltered = useMemo(() => {
-    return db.expenses
-      .filter((e) => {
-        if (!e || !isValidISODate(e.date)) return false;
+  return db.expenses
+    .filter((e) => {
+      if (!e || !isValidISODate(e.date)) return false;
 
-        const inMonth = toMonthKey(e.date) === filters.month;
-        const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
-        const q = filters.q.toLowerCase();
+      const inMonth = !filters.month || toMonthKey(e.date) === filters.month;
+      const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
+      const q = filters.q.toLowerCase();
 
-        const inQ =
-          !filters.q ||
-          (e.note || "").toLowerCase().includes(q) ||
-          (e.expenseId || "").toLowerCase().includes(q) ||
-          getDisplayExpenseId(e).toLowerCase().includes(q);
+      const inQ =
+        !filters.q ||
+        (e.note || "").toLowerCase().includes(q) ||
+        (e.expenseId || "").toLowerCase().includes(q) ||
+        getDisplayExpenseId(e).toLowerCase().includes(q);
 
-        return inMonth && inCat && inQ;
-      })
-      .sort((a, b) => {
-        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-        return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
-      });
-  }, [db.expenses, filters]);
+      return inMonth && inCat && inQ;
+    })
+    .sort((a, b) => {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
+    });
+}, [db.expenses, filters]);
 
   const totals = useMemo(() => {
     const monthTotal = expensesFiltered.reduce(
@@ -897,15 +897,25 @@ const selectedDayTotal = useMemo(() => {
 
         {/* Filtros */}
         <section className="bg-white rounded-2xl shadow p-4 grid gap-3 md:grid-cols-4">
-          <div className="flex flex-col">
-            <label className="text-sm">Mes</label>
-            <input
-              type="month"
-              value={filters.month}
-              onChange={(e) => setFilters((f) => ({ ...f, month: e.target.value }))}
-              className="rounded-xl border p-2"
-            />
-          </div>
+         <div className="flex flex-col">
+  <label className="text-sm">Mes</label>
+  <div className="flex gap-2">
+    <input
+      type="month"
+      value={filters.month}
+      onChange={(e) => setFilters((f) => ({ ...f, month: e.target.value }))}
+      className="rounded-xl border p-2 w-full"
+    />
+    <button
+      type="button"
+      onClick={() => setFilters((f) => ({ ...f, month: "" }))}
+      className="px-3 rounded-xl border bg-white"
+      title="Buscar en todos los meses"
+    >
+      Todos
+    </button>
+  </div>
+</div>
           <div className="flex flex-col">
             <label className="text-sm">Categoría</label>
             <select
@@ -953,7 +963,9 @@ const selectedDayTotal = useMemo(() => {
         {/* Gráficos */}
         <section className="bg-white rounded-2xl shadow p-4 grid md:grid-cols-2 gap-6">
           <div className="h-72">
-            <h3 className="font-semibold mb-2">Gasto por categoría ({filters.month})</h3>
+            <h3 className="font-semibold mb-2">
+  Gasto por categoría ({filters.month || "todos los meses"})
+</h3>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={dataByCategory} margin={{ top: 8, right: 16, left: 0, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -968,7 +980,9 @@ const selectedDayTotal = useMemo(() => {
 
         <div className="h-72">
   <div className="flex items-center justify-between mb-2">
-    <h3 className="font-semibold">Gasto por día del mes ({filters.month})</h3>
+  <h3 className="font-semibold">
+  Gasto por día del mes ({filters.month || "todos los meses"})
+</h3>
     <div className="flex items-center gap-2">
       {Number.isFinite(selectedDay) && (
         <span className="text-xs text-slate-500">
@@ -1018,7 +1032,7 @@ const selectedDayTotal = useMemo(() => {
     <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
       <div>
         <h3 className="font-semibold">
-          Detalle del día {selectedDay} ({filters.month})
+         Detalle del día {selectedDay} ({filters.month || "todos los meses"})
         </h3>
         <p className="text-sm text-slate-500">
           {expensesOfSelectedDay.length} gasto(s) · Total: {fmt(selectedDayTotal)}
