@@ -33,6 +33,7 @@ console.debug("Host actual:", typeof window !== "undefined" ? window.location.ho
 
 // Helpers
 const LS_KEY = "gastos_mvp_v1";
+
 const fmt = (n) =>
   new Intl.NumberFormat(undefined, {
     style: "currency",
@@ -40,8 +41,37 @@ const fmt = (n) =>
     maximumFractionDigits: 2,
   }).format(Number(n || 0));
 
-const todayISO = () => new Date().toISOString().slice(0, 10);
+function todayISO() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 const toMonthKey = (d) => (d || todayISO()).slice(0, 7); // YYYY-MM
+
+function isValidISODate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ""))) return false;
+  const [y, m, d] = String(value).split("-").map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return false;
+  if (m < 1 || m > 12) return false;
+  const lastDay = new Date(y, m, 0).getDate();
+  return d >= 1 && d <= lastDay;
+}
+
+function getDayFromISODate(value) {
+  if (!isValidISODate(value)) return NaN;
+  return Number(String(value).slice(8, 10));
+}
+
+function getDaysInMonth(monthKey) {
+  const [y, m] = String(monthKey || "").split("-").map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) {
+    return 31;
+  }
+  return new Date(y, m, 0).getDate();
+}
 
 // ---------- NUEVOS HELPERS PARA ID DE GASTO ----------
 function buildExpenseCode(num) {
@@ -89,7 +119,7 @@ function normalizeDb(rawDb) {
       id: internalId,
       expenseId,
       modified: Boolean(e?.modified),
-      date: e?.date || todayISO(),
+      date: isValidISODate(e?.date) ? e.date : todayISO(),
       amount: Number(e?.amount || 0),
       categoryId: e?.categoryId || "otros",
       note: e?.note || "",
@@ -122,7 +152,7 @@ function useLocalState(defaultValue) {
 }
 
 // === Registrar Service Worker (PWA) ===
-if ("serviceWorker" in navigator) {
+if (typeof window !== "undefined" && "serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("/sw.js");
   });
@@ -393,7 +423,8 @@ export default function App() {
   const expensesFiltered = useMemo(() => {
     return db.expenses
       .filter((e) => {
-        if (!e || !e.date) return false;
+        if (!e || !isValidISODate(e.date)) return false;
+
         const inMonth = toMonthKey(e.date) === filters.month;
         const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
         const q = filters.q.toLowerCase();
@@ -436,26 +467,24 @@ export default function App() {
   }, [totals.byCat, categoriesById]);
 
   const dataByDay = useMemo(() => {
-    const [y, m] = filters.month.split("-").map(Number);
-    const lastDay = new Date(y, m, 0).getDate();
+    const lastDay = getDaysInMonth(filters.month);
+
     const base = Array.from({ length: lastDay }, (_, i) => ({
       day: i + 1,
       amount: 0,
     }));
 
-    for (const e of db.expenses) {
-      if (!e?.date) continue;
-      if (toMonthKey(e.date) !== filters.month) continue;
-      const t = new Date(e.date).getTime();
-      if (!Number.isFinite(t)) continue;
-      const day = new Date(e.date).getDate();
+    for (const e of expensesFiltered) {
+      const day = getDayFromISODate(e?.date);
+      if (!Number.isFinite(day)) continue;
+
       if (day >= 1 && day <= lastDay) {
         base[day - 1].amount += Number(e.amount ?? 0) || 0;
       }
     }
 
     return base;
-  }, [db.expenses, filters.month]);
+  }, [expensesFiltered, filters.month]);
 
   // ---------- ACCIONES NUEVAS ----------
   function resetForm() {
@@ -472,8 +501,7 @@ export default function App() {
     ev.preventDefault();
 
     const date = (form.date || "").trim();
-    const timeOk = date && Number.isFinite(new Date(date).getTime());
-    if (!timeOk) {
+    if (!isValidISODate(date)) {
       alert("Elegí una fecha válida (AAAA-MM-DD)");
       return;
     }
@@ -609,31 +637,31 @@ export default function App() {
     URL.revokeObjectURL(url);
   }
 
- function exportCSV() {
-  const header = ["id_gasto", "fecha", "monto", "categoria", "nota"];
+  function exportCSV() {
+    const header = ["id_gasto", "fecha", "monto", "categoria", "nota"];
 
-  const rows = db.expenses.map((e) => [
-    getDisplayExpenseId(e),
-    e.date,
-    e.amount,
-    categoriesById[e.categoryId]?.name || e.categoryId,
-    (e.note || "").replaceAll("\n", " "),
-  ]);
+    const rows = db.expenses.map((e) => [
+      getDisplayExpenseId(e),
+      e.date,
+      e.amount,
+      categoriesById[e.categoryId]?.name || e.categoryId,
+      (e.note || "").replaceAll("\n", " "),
+    ]);
 
-  const csv = [header, ...rows]
-    .map((r) =>
-      r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")
-    )
-    .join("\n");
+    const csv = [header, ...rows]
+      .map((r) =>
+        r.map((x) => `"${String(x).replaceAll('"', '""')}"`).join(",")
+      )
+      .join("\n");
 
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `gastos_${filters.month}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-}
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `gastos_${filters.month}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
 
   function importJSON(file) {
     const reader = new FileReader();
