@@ -239,8 +239,9 @@ export default function App() {
     note: "",
   };
 
-  const [form, setForm] = useState(emptyForm);
-  const [editingRecordId, setEditingRecordId] = useState(null);
+ const [form, setForm] = useState(emptyForm);
+const [editingRecordId, setEditingRecordId] = useState(null);
+const [selectedDay, setSelectedDay] = useState(null);
 
   const amountRef = useRef(null);
   useEffect(() => {
@@ -485,7 +486,19 @@ export default function App() {
 
     return base;
   }, [expensesFiltered, filters.month]);
+  const expensesOfSelectedDay = useMemo(() => {
+  if (!Number.isFinite(selectedDay)) return [];
 
+  return expensesFiltered
+    .filter((e) => getDayFromISODate(e?.date) === selectedDay)
+    .sort((a, b) => {
+      return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
+    });
+}, [expensesFiltered, selectedDay]);
+
+const selectedDayTotal = useMemo(() => {
+  return expensesOfSelectedDay.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+}, [expensesOfSelectedDay]);
   // ---------- ACCIONES NUEVAS ----------
   function resetForm() {
     setForm({
@@ -953,20 +966,133 @@ export default function App() {
             </ResponsiveContainer>
           </div>
 
-          <div className="h-72">
-            <h3 className="font-semibold mb-2">Gasto por día del mes ({filters.month})</h3>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={dataByDay} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="day" />
-                <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
-                <Tooltip formatter={(v) => fmt(v)} labelFormatter={(l) => `Día ${l}`} />
-                <Legend />
-                <Line type="monotone" dataKey="amount" name="Monto" dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+        <div className="h-72">
+  <div className="flex items-center justify-between mb-2">
+    <h3 className="font-semibold">Gasto por día del mes ({filters.month})</h3>
+    <div className="flex items-center gap-2">
+      {Number.isFinite(selectedDay) && (
+        <span className="text-xs text-slate-500">
+          Día seleccionado: {selectedDay}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={() => setSelectedDay(null)}
+        className="px-2 py-1 rounded-lg border text-xs bg-white"
+      >
+        Limpiar
+      </button>
+    </div>
+  </div>
+
+  <ResponsiveContainer width="100%" height="100%">
+    <LineChart
+      data={dataByDay}
+      margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+      onClick={(state) => {
+        const day = state?.activeLabel;
+        if (Number.isFinite(day)) {
+          setSelectedDay(day);
+        }
+      }}
+    >
+      <CartesianGrid strokeDasharray="3 3" />
+      <XAxis dataKey="day" />
+      <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
+      <Tooltip formatter={(v) => fmt(v)} labelFormatter={(l) => `Día ${l}`} />
+      <Legend />
+      <Line
+        type="monotone"
+        dataKey="amount"
+        name="Monto"
+        strokeWidth={2}
+        dot={{ r: 3, cursor: "pointer" }}
+        activeDot={{ r: 6, cursor: "pointer" }}
+      />
+    </LineChart>
+  </ResponsiveContainer>
+</div>
         </section>
+        {Number.isFinite(selectedDay) && (
+  <section className="bg-white rounded-2xl shadow p-4">
+    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+      <div>
+        <h3 className="font-semibold">
+          Detalle del día {selectedDay} ({filters.month})
+        </h3>
+        <p className="text-sm text-slate-500">
+          {expensesOfSelectedDay.length} gasto(s) · Total: {fmt(selectedDayTotal)}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setSelectedDay(null)}
+        className="px-3 py-2 rounded-xl bg-white border"
+      >
+        Cerrar detalle
+      </button>
+    </div>
+
+    {expensesOfSelectedDay.length === 0 ? (
+      <div className="text-sm text-slate-500">
+        No hay gastos para ese día con los filtros actuales.
+      </div>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
+          <thead className="bg-slate-100">
+            <tr>
+              <th className="text-left p-2">ID gasto</th>
+              <th className="text-left p-2">Fecha</th>
+              <th className="text-left p-2">Categoría</th>
+              <th className="text-right p-2">Monto</th>
+              <th className="text-left p-2">Nota</th>
+              <th className="text-right p-2">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {expensesOfSelectedDay.map((e) => (
+              <tr key={e.id} className="border-t">
+                <td className="p-2 whitespace-nowrap font-mono">
+                  {getDisplayExpenseId(e)}
+                </td>
+                <td className="p-2 whitespace-nowrap">{e.date}</td>
+                <td className="p-2">
+                  {categoriesById[e.categoryId]?.name || e.categoryId}
+                </td>
+                <td className="p-2 text-right font-medium">{fmt(e.amount)}</td>
+                <td className="p-2">{e.note}</td>
+                <td className="p-2 text-right">
+                  <div className="flex justify-end gap-3 whitespace-nowrap">
+                    <button
+                      onClick={() => editExpense(e)}
+                      className="text-slate-700 hover:underline"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => duplicateExpense(e)}
+                      className="text-blue-700 hover:underline"
+                    >
+                      Duplicar
+                    </button>
+                    <button
+                      onClick={() => removeExpense(e.id)}
+                      className="text-red-600 hover:underline"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+)}
 
         {/* Alta / Edición de gasto */}
         <section className="bg-white rounded-2xl shadow p-4">
