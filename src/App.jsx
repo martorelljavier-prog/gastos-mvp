@@ -577,7 +577,21 @@ export default function App() {
     );
     setEditingRecordId(null);
   }
-
+  function resolveAmountInForm() {
+    try {
+      const result = evaluateAmountExpression(form.amount);
+      setForm((f) => ({ ...f, amount: String(result) }));
+      setTimeout(() => {
+        amountRef.current?.focus();
+        const len = String(result).length;
+        amountRef.current?.setSelectionRange?.(len, len);
+      }, 0);
+      return true;
+    } catch (e) {
+      alert(e?.message || "Ingresá un monto válido");
+      return false;
+    }
+  }
   function handleSubmitExpense(ev) {
     ev.preventDefault();
 
@@ -1223,23 +1237,29 @@ export default function App() {
 
             <div className="flex flex-col">
               <label className="text-sm">Monto ({db.currency})</label>
-              <input
-                ref={amountRef}
-                inputMode="text"
-                placeholder="Ej: 1200+350 o 2*1500"
-                value={form.amount}
-                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-                onBlur={() => {
-                  if (!String(form.amount || "").trim()) return;
-                  try {
-                    const result = evaluateAmountExpression(form.amount);
-                    setForm((f) => ({ ...f, amount: String(result) }));
-                  } catch {
-                    // No hacemos nada en blur; se valida al guardar
-                  }
-                }}
-                className="rounded-xl border p-2"
-              />
+             <input
+  ref={amountRef}
+  inputMode="text"
+  placeholder="Ej: 1200+350 o 2*1500"
+  value={form.amount}
+  onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+  onKeyDown={(e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      resolveAmountInForm();
+    }
+  }}
+  onBlur={() => {
+    if (!String(form.amount || "").trim()) return;
+    try {
+      const result = evaluateAmountExpression(form.amount);
+      setForm((f) => ({ ...f, amount: String(result) }));
+    } catch {
+      // No hacemos nada en blur; se valida al guardar
+    }
+  }}
+  className="rounded-xl border p-2"
+/>
             </div>
 
             <div className="flex flex-col">
