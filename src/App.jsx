@@ -73,6 +73,60 @@ function getDaysInMonth(monthKey) {
   return new Date(y, m, 0).getDate();
 }
 
+function getFirstCategoryId(categories = []) {
+  if (!Array.isArray(categories) || categories.length === 0) return "otros";
+
+  return [...categories]
+    .sort((a, b) =>
+      String(a?.name || "").localeCompare(String(b?.name || ""), "es", {
+        sensitivity: "base",
+      })
+    )[0]?.id || "otros";
+}
+
+function buildEmptyForm(categories = [], overrides = {}) {
+  return {
+    date: todayISO(),
+    amount: "",
+    categoryId: getFirstCategoryId(categories),
+    note: "",
+    ...overrides,
+  };
+}
+
+function evaluateAmountExpression(rawValue) {
+  const raw = String(rawValue ?? "").trim();
+
+  if (!raw) {
+    throw new Error("Ingresá un monto");
+  }
+
+  const normalized = raw.replace(/,/g, ".").replace(/\s+/g, "");
+
+  // Solo permite números, paréntesis y operadores básicos
+  if (!/^[\d.+\-*/()]+$/.test(normalized)) {
+    throw new Error("El monto solo puede contener números y + - * / ( )");
+  }
+
+  // Evita operadores repetidos inválidos tipo ++, **, //, etc.
+  if (/[*\/]{2,}|\+\+|--|\)\(|\.\./.test(normalized)) {
+    throw new Error("La operación ingresada no es válida");
+  }
+
+  let result;
+  try {
+    result = Function(`"use strict"; return (${normalized});`)();
+  } catch {
+    throw new Error("La operación ingresada no es válida");
+  }
+
+  if (!Number.isFinite(result) || result <= 0) {
+    throw new Error("Ingresá un monto válido (>0)");
+  }
+
+  return Number(result);
+}
+
 // ---------- NUEVOS HELPERS PARA ID DE GASTO ----------
 function buildExpenseCode(num) {
   return `G${String(num).padStart(6, "0")}`;
@@ -232,21 +286,26 @@ export default function App() {
     q: "",
   });
 
-  const emptyForm = {
-    date: todayISO(),
-    amount: "",
-    categoryId: "almuerzo-trabajo",
-    note: "",
-  };
-
- const [form, setForm] = useState(emptyForm);
-const [editingRecordId, setEditingRecordId] = useState(null);
-const [selectedDay, setSelectedDay] = useState(null);
+  const [form, setForm] = useState(() => buildEmptyForm(db.categories));
+  const [editingRecordId, setEditingRecordId] = useState(null);
+  const [selectedDay, setSelectedDay] = useState(null);
 
   const amountRef = useRef(null);
   useEffect(() => {
     amountRef.current?.focus();
   }, []);
+
+  // Si no existe la categoría seleccionada en el form, la corrige
+  useEffect(() => {
+    setForm((prev) => {
+      const exists = db.categories.some((c) => c.id === prev.categoryId);
+      if (exists) return prev;
+      return {
+        ...prev,
+        categoryId: getFirstCategoryId(db.categories),
+      };
+    });
+  }, [db.categories]);
 
   // Auth & sync state
   const [email, setEmail] = useState("");
@@ -422,27 +481,27 @@ const [selectedDay, setSelectedDay] = useState(null);
   );
 
   const expensesFiltered = useMemo(() => {
-  return db.expenses
-    .filter((e) => {
-      if (!e || !isValidISODate(e.date)) return false;
+    return db.expenses
+      .filter((e) => {
+        if (!e || !isValidISODate(e.date)) return false;
 
-      const inMonth = !filters.month || toMonthKey(e.date) === filters.month;
-      const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
-      const q = filters.q.toLowerCase();
+        const inMonth = !filters.month || toMonthKey(e.date) === filters.month;
+        const inCat = filters.categoryId === "all" || e.categoryId === filters.categoryId;
+        const q = filters.q.toLowerCase();
 
-      const inQ =
-        !filters.q ||
-        (e.note || "").toLowerCase().includes(q) ||
-        (e.expenseId || "").toLowerCase().includes(q) ||
-        getDisplayExpenseId(e).toLowerCase().includes(q);
+        const inQ =
+          !filters.q ||
+          (e.note || "").toLowerCase().includes(q) ||
+          (e.expenseId || "").toLowerCase().includes(q) ||
+          getDisplayExpenseId(e).toLowerCase().includes(q);
 
-      return inMonth && inCat && inQ;
-    })
-    .sort((a, b) => {
-      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
-      return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
-    });
-}, [db.expenses, filters]);
+        return inMonth && inCat && inQ;
+      })
+      .sort((a, b) => {
+        if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+        return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
+      });
+  }, [db.expenses, filters]);
 
   const totals = useMemo(() => {
     const monthTotal = expensesFiltered.reduce(
@@ -468,7 +527,7 @@ const [selectedDay, setSelectedDay] = useState(null);
   }, [totals.byCat, categoriesById]);
 
   const dataByDay = useMemo(() => {
-    const lastDay = getDaysInMonth(filters.month);
+    const lastDay = getDaysInMonth(filters.month || toMonthKey(todayISO()));
 
     const base = Array.from({ length: lastDay }, (_, i) => ({
       day: i + 1,
@@ -486,27 +545,36 @@ const [selectedDay, setSelectedDay] = useState(null);
 
     return base;
   }, [expensesFiltered, filters.month]);
+
   const expensesOfSelectedDay = useMemo(() => {
-  if (!Number.isFinite(selectedDay)) return [];
+    if (!Number.isFinite(selectedDay)) return [];
 
-  return expensesFiltered
-    .filter((e) => getDayFromISODate(e?.date) === selectedDay)
-    .sort((a, b) => {
-      return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
-    });
-}, [expensesFiltered, selectedDay]);
+    return expensesFiltered
+      .filter((e) => getDayFromISODate(e?.date) === selectedDay)
+      .sort((a, b) => {
+        return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
+      });
+  }, [expensesFiltered, selectedDay]);
 
-const selectedDayTotal = useMemo(() => {
-  return expensesOfSelectedDay.reduce((acc, e) => acc + Number(e.amount || 0), 0);
-}, [expensesOfSelectedDay]);
-  // ---------- ACCIONES NUEVAS ----------
-  function resetForm() {
-    setForm({
-      date: todayISO(),
-      amount: "",
-      categoryId: db.categories[0]?.id || "otros",
-      note: "",
-    });
+  const selectedDayTotal = useMemo(() => {
+    return expensesOfSelectedDay.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+  }, [expensesOfSelectedDay]);
+
+  function resetForm(options = {}) {
+    const {
+      preserveLastDateAndCategory = false,
+      forcedDate,
+      forcedCategoryId,
+    } = options;
+
+    setForm((prev) =>
+      buildEmptyForm(db.categories, {
+        date: preserveLastDateAndCategory ? prev.date : forcedDate || todayISO(),
+        categoryId: preserveLastDateAndCategory
+          ? prev.categoryId
+          : forcedCategoryId || getFirstCategoryId(db.categories),
+      })
+    );
     setEditingRecordId(null);
   }
 
@@ -519,9 +587,11 @@ const selectedDayTotal = useMemo(() => {
       return;
     }
 
-    const amt = Number(String(form.amount ?? "").replace(",", "."));
-    if (!Number.isFinite(amt) || amt <= 0) {
-      alert("Ingresá un monto válido (>0)");
+    let amt;
+    try {
+      amt = evaluateAmountExpression(form.amount);
+    } catch (e) {
+      alert(e?.message || "Ingresá un monto válido");
       return;
     }
 
@@ -566,7 +636,7 @@ const selectedDayTotal = useMemo(() => {
       }));
     }
 
-    resetForm();
+    resetForm({ preserveLastDateAndCategory: true });
     amountRef.current?.focus();
   }
 
@@ -585,7 +655,7 @@ const selectedDayTotal = useMemo(() => {
     setForm({
       date: expense.date || todayISO(),
       amount: String(expense.amount ?? ""),
-      categoryId: expense.categoryId || db.categories[0]?.id || "otros",
+      categoryId: expense.categoryId || getFirstCategoryId(db.categories),
       note: expense.note || "",
     });
     setEditingRecordId(expense.id);
@@ -597,7 +667,7 @@ const selectedDayTotal = useMemo(() => {
     setForm({
       date: expense.date || todayISO(),
       amount: String(expense.amount ?? ""),
-      categoryId: expense.categoryId || db.categories[0]?.id || "otros",
+      categoryId: expense.categoryId || getFirstCategoryId(db.categories),
       note: expense.note || "",
     });
     setEditingRecordId(null);
@@ -645,7 +715,7 @@ const selectedDayTotal = useMemo(() => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `gastos_${filters.month}.json`;
+    a.download = `gastos_${filters.month || "todos"}.json`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -671,7 +741,7 @@ const selectedDayTotal = useMemo(() => {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `gastos_${filters.month}.csv`;
+    a.download = `gastos_${filters.month || "todos"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -684,7 +754,10 @@ const selectedDayTotal = useMemo(() => {
         if (!parsed?.expenses || !parsed?.categories) {
           throw new Error("Formato inválido");
         }
-        setDb(normalizeDb(parsed));
+        const normalized = normalizeDb(parsed);
+        setDb(normalized);
+        setForm(buildEmptyForm(normalized.categories));
+        setEditingRecordId(null);
         alert("Datos importados");
       } catch (e) {
         alert("No pude importar el archivo. Revisá el formato JSON.");
@@ -709,8 +782,11 @@ const selectedDayTotal = useMemo(() => {
     }
 
     if (remote.data?.payload) {
-      setDb(normalizeDb(remote.data.payload));
+      const normalized = normalizeDb(remote.data.payload);
+      setDb(normalized);
       setLastSync(new Date());
+      setForm(buildEmptyForm(normalized.categories));
+      setEditingRecordId(null);
     } else {
       alert("No hay datos remotos aún");
     }
@@ -897,25 +973,26 @@ const selectedDayTotal = useMemo(() => {
 
         {/* Filtros */}
         <section className="bg-white rounded-2xl shadow p-4 grid gap-3 md:grid-cols-4">
-         <div className="flex flex-col">
-  <label className="text-sm">Mes</label>
-  <div className="flex gap-2">
-    <input
-      type="month"
-      value={filters.month}
-      onChange={(e) => setFilters((f) => ({ ...f, month: e.target.value }))}
-      className="rounded-xl border p-2 w-full"
-    />
-    <button
-      type="button"
-      onClick={() => setFilters((f) => ({ ...f, month: "" }))}
-      className="px-3 rounded-xl border bg-white"
-      title="Buscar en todos los meses"
-    >
-      Todos
-    </button>
-  </div>
-</div>
+          <div className="flex flex-col">
+            <label className="text-sm">Mes</label>
+            <div className="flex gap-2">
+              <input
+                type="month"
+                value={filters.month}
+                onChange={(e) => setFilters((f) => ({ ...f, month: e.target.value }))}
+                className="rounded-xl border p-2 w-full"
+              />
+              <button
+                type="button"
+                onClick={() => setFilters((f) => ({ ...f, month: "" }))}
+                className="px-3 rounded-xl border bg-white"
+                title="Buscar en todos los meses"
+              >
+                Todos
+              </button>
+            </div>
+          </div>
+
           <div className="flex flex-col">
             <label className="text-sm">Categoría</label>
             <select
@@ -931,6 +1008,7 @@ const selectedDayTotal = useMemo(() => {
               ))}
             </select>
           </div>
+
           <div className="flex flex-col md:col-span-2">
             <label className="text-sm">Buscar nota o ID</label>
             <input
@@ -964,8 +1042,8 @@ const selectedDayTotal = useMemo(() => {
         <section className="bg-white rounded-2xl shadow p-4 grid md:grid-cols-2 gap-6">
           <div className="h-72">
             <h3 className="font-semibold mb-2">
-  Gasto por categoría ({filters.month || "todos los meses"})
-</h3>
+              Gasto por categoría ({filters.month || "todos los meses"})
+            </h3>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={dataByCategory} margin={{ top: 8, right: 16, left: 0, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" />
@@ -978,135 +1056,136 @@ const selectedDayTotal = useMemo(() => {
             </ResponsiveContainer>
           </div>
 
-        <div className="h-72">
-  <div className="flex items-center justify-between mb-2">
-  <h3 className="font-semibold">
-  Gasto por día del mes ({filters.month || "todos los meses"})
-</h3>
-    <div className="flex items-center gap-2">
-      {Number.isFinite(selectedDay) && (
-        <span className="text-xs text-slate-500">
-          Día seleccionado: {selectedDay}
-        </span>
-      )}
-      <button
-        type="button"
-        onClick={() => setSelectedDay(null)}
-        className="px-2 py-1 rounded-lg border text-xs bg-white"
-      >
-        Limpiar
-      </button>
-    </div>
-  </div>
+          <div className="h-72">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold">
+                Gasto por día del mes ({filters.month || "todos los meses"})
+              </h3>
+              <div className="flex items-center gap-2">
+                {Number.isFinite(selectedDay) && (
+                  <span className="text-xs text-slate-500">
+                    Día seleccionado: {selectedDay}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedDay(null)}
+                  className="px-2 py-1 rounded-lg border text-xs bg-white"
+                >
+                  Limpiar
+                </button>
+              </div>
+            </div>
 
-  <ResponsiveContainer width="100%" height="100%">
-    <LineChart
-      data={dataByDay}
-      margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
-      onClick={(state) => {
-        const day = state?.activeLabel;
-        if (Number.isFinite(day)) {
-          setSelectedDay(day);
-        }
-      }}
-    >
-      <CartesianGrid strokeDasharray="3 3" />
-      <XAxis dataKey="day" />
-      <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
-      <Tooltip formatter={(v) => fmt(v)} labelFormatter={(l) => `Día ${l}`} />
-      <Legend />
-      <Line
-        type="monotone"
-        dataKey="amount"
-        name="Monto"
-        strokeWidth={2}
-        dot={{ r: 3, cursor: "pointer" }}
-        activeDot={{ r: 6, cursor: "pointer" }}
-      />
-    </LineChart>
-  </ResponsiveContainer>
-</div>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={dataByDay}
+                margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+                onClick={(state) => {
+                  const day = state?.activeLabel;
+                  if (Number.isFinite(day)) {
+                    setSelectedDay(day);
+                  }
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" />
+                <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
+                <Tooltip formatter={(v) => fmt(v)} labelFormatter={(l) => `Día ${l}`} />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="amount"
+                  name="Monto"
+                  strokeWidth={2}
+                  dot={{ r: 3, cursor: "pointer" }}
+                  activeDot={{ r: 6, cursor: "pointer" }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
         </section>
+
         {Number.isFinite(selectedDay) && (
-  <section className="bg-white rounded-2xl shadow p-4">
-    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
-      <div>
-        <h3 className="font-semibold">
-         Detalle del día {selectedDay} ({filters.month || "todos los meses"})
-        </h3>
-        <p className="text-sm text-slate-500">
-          {expensesOfSelectedDay.length} gasto(s) · Total: {fmt(selectedDayTotal)}
-        </p>
-      </div>
+          <section className="bg-white rounded-2xl shadow p-4">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+              <div>
+                <h3 className="font-semibold">
+                  Detalle del día {selectedDay} ({filters.month || "todos los meses"})
+                </h3>
+                <p className="text-sm text-slate-500">
+                  {expensesOfSelectedDay.length} gasto(s) · Total: {fmt(selectedDayTotal)}
+                </p>
+              </div>
 
-      <button
-        type="button"
-        onClick={() => setSelectedDay(null)}
-        className="px-3 py-2 rounded-xl bg-white border"
-      >
-        Cerrar detalle
-      </button>
-    </div>
+              <button
+                type="button"
+                onClick={() => setSelectedDay(null)}
+                className="px-3 py-2 rounded-xl bg-white border"
+              >
+                Cerrar detalle
+              </button>
+            </div>
 
-    {expensesOfSelectedDay.length === 0 ? (
-      <div className="text-sm text-slate-500">
-        No hay gastos para ese día con los filtros actuales.
-      </div>
-    ) : (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[700px]">
-          <thead className="bg-slate-100">
-            <tr>
-              <th className="text-left p-2">ID gasto</th>
-              <th className="text-left p-2">Fecha</th>
-              <th className="text-left p-2">Categoría</th>
-              <th className="text-right p-2">Monto</th>
-              <th className="text-left p-2">Nota</th>
-              <th className="text-right p-2">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {expensesOfSelectedDay.map((e) => (
-              <tr key={e.id} className="border-t">
-                <td className="p-2 whitespace-nowrap font-mono">
-                  {getDisplayExpenseId(e)}
-                </td>
-                <td className="p-2 whitespace-nowrap">{e.date}</td>
-                <td className="p-2">
-                  {categoriesById[e.categoryId]?.name || e.categoryId}
-                </td>
-                <td className="p-2 text-right font-medium">{fmt(e.amount)}</td>
-                <td className="p-2">{e.note}</td>
-                <td className="p-2 text-right">
-                  <div className="flex justify-end gap-3 whitespace-nowrap">
-                    <button
-                      onClick={() => editExpense(e)}
-                      className="text-slate-700 hover:underline"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => duplicateExpense(e)}
-                      className="text-blue-700 hover:underline"
-                    >
-                      Duplicar
-                    </button>
-                    <button
-                      onClick={() => removeExpense(e.id)}
-                      className="text-red-600 hover:underline"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )}
-  </section>
-)}
+            {expensesOfSelectedDay.length === 0 ? (
+              <div className="text-sm text-slate-500">
+                No hay gastos para ese día con los filtros actuales.
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[700px]">
+                  <thead className="bg-slate-100">
+                    <tr>
+                      <th className="text-left p-2">ID gasto</th>
+                      <th className="text-left p-2">Fecha</th>
+                      <th className="text-left p-2">Categoría</th>
+                      <th className="text-right p-2">Monto</th>
+                      <th className="text-left p-2">Nota</th>
+                      <th className="text-right p-2">Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expensesOfSelectedDay.map((e) => (
+                      <tr key={e.id} className="border-t">
+                        <td className="p-2 whitespace-nowrap font-mono">
+                          {getDisplayExpenseId(e)}
+                        </td>
+                        <td className="p-2 whitespace-nowrap">{e.date}</td>
+                        <td className="p-2">
+                          {categoriesById[e.categoryId]?.name || e.categoryId}
+                        </td>
+                        <td className="p-2 text-right font-medium">{fmt(e.amount)}</td>
+                        <td className="p-2">{e.note}</td>
+                        <td className="p-2 text-right">
+                          <div className="flex justify-end gap-3 whitespace-nowrap">
+                            <button
+                              onClick={() => editExpense(e)}
+                              className="text-slate-700 hover:underline"
+                            >
+                              Editar
+                            </button>
+                            <button
+                              onClick={() => duplicateExpense(e)}
+                              className="text-blue-700 hover:underline"
+                            >
+                              Duplicar
+                            </button>
+                            <button
+                              onClick={() => removeExpense(e.id)}
+                              className="text-red-600 hover:underline"
+                            >
+                              Eliminar
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Alta / Edición de gasto */}
         <section className="bg-white rounded-2xl shadow p-4">
@@ -1122,7 +1201,7 @@ const selectedDayTotal = useMemo(() => {
                 </span>
                 <button
                   type="button"
-                  onClick={resetForm}
+                  onClick={() => resetForm()}
                   className="px-3 py-2 rounded-xl bg-white border"
                 >
                   Cancelar edición
@@ -1146,10 +1225,19 @@ const selectedDayTotal = useMemo(() => {
               <label className="text-sm">Monto ({db.currency})</label>
               <input
                 ref={amountRef}
-                inputMode="decimal"
-                placeholder="0,00"
+                inputMode="text"
+                placeholder="Ej: 1200+350 o 2*1500"
                 value={form.amount}
                 onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                onBlur={() => {
+                  if (!String(form.amount || "").trim()) return;
+                  try {
+                    const result = evaluateAmountExpression(form.amount);
+                    setForm((f) => ({ ...f, amount: String(result) }));
+                  } catch {
+                    // No hacemos nada en blur; se valida al guardar
+                  }
+                }}
                 className="rounded-xl border p-2"
               />
             </div>
@@ -1199,7 +1287,7 @@ const selectedDayTotal = useMemo(() => {
 
               <button
                 type="button"
-                onClick={resetForm}
+                onClick={() => resetForm()}
                 className="px-4 py-2 rounded-2xl bg-white border"
               >
                 Limpiar formulario
