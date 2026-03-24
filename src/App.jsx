@@ -24,7 +24,7 @@ if (typeof window !== "undefined" && window.location.host !== CANONICAL_HOST) {
 
 const SUPABASE_URL = "https://qugnkfjbfqcihummbaal.supabase.co";
 const SUPABASE_ANON =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiJzdXBhYmFzZSIsInJlZiI6InF1Z25rZmpiZnFjaWh1bW1iYWFsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjE5NDU5NzQsImV4cCI6MjA3NzUyMTk3NH0.b6etAkGNHkCPE5rUulXNuw36vHFAm_kv1_pVopc_c14";
 const sb = createClient(SUPABASE_URL, SUPABASE_ANON, {
   auth: { persistSession: true, autoRefreshToken: true },
 });
@@ -127,7 +127,7 @@ function evaluateAmountExpression(rawValue) {
   return Number(result);
 }
 
-// ---------- NUEVOS HELPERS PARA ID DE GASTO ----------
+// ---------- HELPERS PARA ID DE GASTO ----------
 function buildExpenseCode(num) {
   return `G${String(num).padStart(6, "0")}`;
 }
@@ -475,9 +475,13 @@ export default function App() {
   }
 
   // Derivados
-   const noteSuggestions = useMemo(() => {
-    const currentText = String(form.note || "").trim().toLowerCase();
+  const categoriesById = useMemo(
+    () => Object.fromEntries(db.categories.map((c) => [c.id, c])),
+    [db.categories]
+  );
 
+  const noteSuggestions = useMemo(() => {
+    const currentText = String(form.note || "").trim().toLowerCase();
     const sameCategory = [];
     const otherCategories = [];
     const seen = new Set();
@@ -603,6 +607,7 @@ export default function App() {
     );
     setEditingRecordId(null);
   }
+
   function resolveAmountInForm() {
     try {
       const result = evaluateAmountExpression(form.amount);
@@ -618,6 +623,7 @@ export default function App() {
       return false;
     }
   }
+
   function handleSubmitExpense(ev) {
     ev.preventDefault();
 
@@ -1263,29 +1269,29 @@ export default function App() {
 
             <div className="flex flex-col">
               <label className="text-sm">Monto ({db.currency})</label>
-             <input
-  ref={amountRef}
-  inputMode="text"
-  placeholder="Ej: 1200+350 o 2*1500"
-  value={form.amount}
-  onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-  onKeyDown={(e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      resolveAmountInForm();
-    }
-  }}
-  onBlur={() => {
-    if (!String(form.amount || "").trim()) return;
-    try {
-      const result = evaluateAmountExpression(form.amount);
-      setForm((f) => ({ ...f, amount: String(result) }));
-    } catch {
-      // No hacemos nada en blur; se valida al guardar
-    }
-  }}
-  className="rounded-xl border p-2"
-/>
+              <input
+                ref={amountRef}
+                inputMode="text"
+                placeholder="Ej: 1200+350 o 2*1500"
+                value={form.amount}
+                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    resolveAmountInForm();
+                  }
+                }}
+                onBlur={() => {
+                  if (!String(form.amount || "").trim()) return;
+                  try {
+                    const result = evaluateAmountExpression(form.amount);
+                    setForm((f) => ({ ...f, amount: String(result) }));
+                  } catch {
+                    // No hacemos nada en blur; se valida al guardar
+                  }
+                }}
+                className="rounded-xl border p-2"
+              />
             </div>
 
             <div className="flex flex-col">
@@ -1314,21 +1320,21 @@ export default function App() {
             </div>
 
             <div className="flex flex-col md:col-span-2">
-  <label className="text-sm">Nota</label>
-  <input
-    list="note-suggestions"
-    value={form.note}
-    onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-    placeholder="Detalle opcional"
-    className="rounded-xl border p-2"
-    autoComplete="off"
-  />
-  <datalist id="note-suggestions">
-    {noteSuggestions.map((note) => (
-      <option key={note} value={note} />
-    ))}
-  </datalist>
-</div>
+              <label className="text-sm">Nota</label>
+              <input
+                list="note-suggestions"
+                value={form.note}
+                onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="Detalle opcional"
+                className="rounded-xl border p-2"
+                autoComplete="off"
+              />
+              <datalist id="note-suggestions">
+                {noteSuggestions.map((note) => (
+                  <option key={note} value={note} />
+                ))}
+              </datalist>
+            </div>
 
             <div className="md:col-span-5 flex gap-2 flex-wrap">
               <button
