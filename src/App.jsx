@@ -475,10 +475,36 @@ export default function App() {
   }
 
   // Derivados
-  const categoriesById = useMemo(
-    () => Object.fromEntries(db.categories.map((c) => [c.id, c])),
-    [db.categories]
-  );
+   const noteSuggestions = useMemo(() => {
+    const currentText = String(form.note || "").trim().toLowerCase();
+
+    const sameCategory = [];
+    const otherCategories = [];
+    const seen = new Set();
+
+    for (const e of db.expenses) {
+      const note = String(e?.note || "").trim();
+      if (!note) continue;
+
+      const key = note.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      if (e.categoryId === form.categoryId) {
+        sameCategory.push(note);
+      } else {
+        otherCategories.push(note);
+      }
+    }
+
+    const ordered = [...sameCategory, ...otherCategories];
+
+    if (!currentText) return ordered.slice(0, 20);
+
+    return ordered
+      .filter((note) => note.toLowerCase().includes(currentText))
+      .slice(0, 20);
+  }, [db.expenses, form.note, form.categoryId]);
 
   const expensesFiltered = useMemo(() => {
     return db.expenses
@@ -1288,14 +1314,21 @@ export default function App() {
             </div>
 
             <div className="flex flex-col md:col-span-2">
-              <label className="text-sm">Nota</label>
-              <input
-                value={form.note}
-                onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-                placeholder="Detalle opcional"
-                className="rounded-xl border p-2"
-              />
-            </div>
+  <label className="text-sm">Nota</label>
+  <input
+    list="note-suggestions"
+    value={form.note}
+    onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+    placeholder="Detalle opcional"
+    className="rounded-xl border p-2"
+    autoComplete="off"
+  />
+  <datalist id="note-suggestions">
+    {noteSuggestions.map((note) => (
+      <option key={note} value={note} />
+    ))}
+  </datalist>
+</div>
 
             <div className="md:col-span-5 flex gap-2 flex-wrap">
               <button
