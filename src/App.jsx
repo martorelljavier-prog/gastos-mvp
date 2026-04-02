@@ -1091,14 +1091,26 @@ export default function App() {
               Gasto por categoría ({filters.month || "todos los meses"})
             </h3>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={dataByCategory} margin={{ top: 8, right: 16, left: 0, bottom: 24 }}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" interval={0} angle={-25} textAnchor="end" height={60} />
-                <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
-                <Tooltip formatter={(v) => fmt(v)} />
-                <Legend />
-                <Bar dataKey="amount" name="Monto" />
-              </BarChart>
+              <BarChart
+  data={dataByCategory}
+  margin={{ top: 8, right: 16, left: 50, bottom: 24 }}
+>
+  <CartesianGrid strokeDasharray="3 3" />
+  <XAxis
+    dataKey="name"
+    interval={0}
+    angle={-25}
+    textAnchor="end"
+    height={60}
+  />
+  <YAxis
+    tick={{ fontSize: 11 }}
+    tickFormatter={(v) => new Intl.NumberFormat("es-AR").format(v)}
+  />
+  <Tooltip formatter={(v) => fmt(v)} />
+  <Legend />
+  <Bar dataKey="amount" name="Monto" />
+</BarChart>
             </ResponsiveContainer>
           </div>
 
@@ -1124,30 +1136,36 @@ export default function App() {
             </div>
 
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart
-                data={dataByDay}
-                margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
-                onClick={(state) => {
-                  const day = state?.activeLabel;
-                  if (Number.isFinite(day)) {
-                    setSelectedDay(day);
-                  }
-                }}
-              >
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="day" />
-                <YAxis tickFormatter={(v) => new Intl.NumberFormat().format(v)} />
-                <Tooltip formatter={(v) => fmt(v)} labelFormatter={(l) => `Día ${l}`} />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="amount"
-                  name="Monto"
-                  strokeWidth={2}
-                  dot={{ r: 3, cursor: "pointer" }}
-                  activeDot={{ r: 6, cursor: "pointer" }}
-                />
-              </LineChart>
+             <LineChart
+  data={dataByDay}
+  margin={{ top: 8, right: 16, left: 50, bottom: 8 }}
+  onClick={(state) => {
+    const day = state?.activeLabel;
+    if (Number.isFinite(day)) {
+      setSelectedDay(day);
+    }
+  }}
+>
+  <CartesianGrid strokeDasharray="3 3" />
+  <XAxis dataKey="day" />
+  <YAxis
+    tick={{ fontSize: 11 }}
+    tickFormatter={(v) => new Intl.NumberFormat("es-AR").format(v)}
+  />
+  <Tooltip
+    formatter={(v) => fmt(v)}
+    labelFormatter={(l) => `Día ${l}`}
+  />
+  <Legend />
+  <Line
+    type="monotone"
+    dataKey="amount"
+    name="Monto"
+    strokeWidth={2}
+    dot={{ r: 3, cursor: "pointer" }}
+    activeDot={{ r: 6, cursor: "pointer" }}
+  />
+</LineChart>
             </ResponsiveContainer>
           </div>
         </section>
