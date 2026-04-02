@@ -1096,14 +1096,14 @@ export default function App() {
   margin={{ top: 8, right: 16, left: 50, bottom: 24 }}
 >
   <CartesianGrid strokeDasharray="3 3" />
-  <XAxis
-    dataKey="name"
-    interval={0}
-    angle={-25}
-    textAnchor="end"
-    height={60}
-  />
-  <YAxis
+<XAxis
+  dataKey="name"
+  angle={-45}
+  textAnchor="end"
+  height={90}
+  tick={{ fontSize: 10 }}
+/> 
+ <YAxis
     tick={{ fontSize: 11 }}
     tickFormatter={(v) => new Intl.NumberFormat("es-AR").format(v)}
   />
