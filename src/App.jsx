@@ -289,7 +289,7 @@ export default function App() {
   const [form, setForm] = useState(() => buildEmptyForm(db.categories));
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [selectedDay, setSelectedDay] = useState(null);
-
+  const [selectedCategoryName, setSelectedCategoryName] = useState(null);
   const amountRef = useRef(null);
   useEffect(() => {
     amountRef.current?.focus();
@@ -587,8 +587,109 @@ export default function App() {
   }, [expensesFiltered, selectedDay]);
 
   const selectedDayTotal = useMemo(() => {
+  const expensesOfSelectedCategory = useMemo(() => {
+  if (!selectedCategoryName) return [];
+
+  return expensesFiltered
+    .filter(
+      (e) =>
+        (categoriesById[e.categoryId]?.name || e.categoryId) ===
+        selectedCategoryName
+    )
+    .sort((a, b) => Number(b.amount) - Number(a.amount));
+}, [expensesFiltered, selectedCategoryName, categoriesById]);
+
+const selectedCategoryTotal = useMemo(() => {
+  return expensesOfSelectedCategory.reduce(
+    (acc, e) => acc + Number(e.amount || 0),
+    0
+  );
+}, [expensesOfSelectedCategory]);  
     return expensesOfSelectedDay.reduce((acc, e) => acc + Number(e.amount || 0), 0);
   }, [expensesOfSelectedDay]);
+
+  {selectedCategoryName && (
+  <section className="bg-white rounded-2xl shadow p-4">
+    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
+      <div>
+        <h3 className="font-semibold">
+          Detalle categoría: {selectedCategoryName}
+        </h3>
+        <p className="text-sm text-slate-500">
+          {expensesOfSelectedCategory.length} gasto(s) · Total: {fmt(selectedCategoryTotal)}
+        </p>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => setSelectedCategoryName(null)}
+        className="px-3 py-2 rounded-xl bg-white border"
+      >
+        Cerrar detalle
+      </button>
+    </div>
+
+    {expensesOfSelectedCategory.length === 0 ? (
+      <div className="text-sm text-slate-500">
+        No hay gastos para esa categoría con los filtros actuales.
+      </div>
+    ) : (
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
+          <thead className="bg-slate-100">
+            <tr>
+              <th className="text-left p-2">ID gasto</th>
+              <th className="text-left p-2">Fecha</th>
+              <th className="text-left p-2">Categoría</th>
+              <th className="text-right p-2">Monto</th>
+              <th className="text-left p-2">Nota</th>
+              <th className="text-right p-2">Acciones</th>
+            </tr>
+          </thead>
+          <tbody>
+            {expensesOfSelectedCategory.map((e) => (
+              <tr key={e.id} className="border-t">
+                <td className="p-2 whitespace-nowrap font-mono">
+                  {getDisplayExpenseId(e)}
+                </td>
+                <td className="p-2 whitespace-nowrap">{e.date}</td>
+                <td className="p-2">
+                  {categoriesById[e.categoryId]?.name || e.categoryId}
+                </td>
+                <td className="p-2 text-right font-medium">
+                  {fmt(e.amount)}
+                </td>
+                <td className="p-2">{e.note}</td>
+                <td className="p-2 text-right">
+                  <div className="flex justify-end gap-3 whitespace-nowrap">
+                    <button
+                      onClick={() => editExpense(e)}
+                      className="text-slate-700 hover:underline"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      onClick={() => duplicateExpense(e)}
+                      className="text-blue-700 hover:underline"
+                    >
+                      Duplicar
+                    </button>
+                    <button
+                      onClick={() => removeExpense(e.id)}
+                      className="text-red-600 hover:underline"
+                    >
+                      Eliminar
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </section>
+)}
 
   function resetForm(options = {}) {
     const {
@@ -1091,9 +1192,15 @@ export default function App() {
               Gasto por categoría ({filters.month || "todos los meses"})
             </h3>
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart
+         <BarChart
   data={dataByCategory}
   margin={{ top: 8, right: 16, left: 50, bottom: 24 }}
+  onClick={(state) => {
+    const cat = state?.activeLabel;
+    if (cat) {
+      setSelectedCategoryName(cat);
+    }
+  }}
 >
   <CartesianGrid strokeDasharray="3 3" />
 <XAxis
