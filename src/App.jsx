@@ -585,16 +585,17 @@ export default function App() {
         return extractExpenseNumber(b.expenseId) - extractExpenseNumber(a.expenseId);
       });
   }, [expensesFiltered, selectedDay]);
+const selectedDayTotal = useMemo(() => {
+  return expensesOfSelectedDay.reduce((acc, e) => acc + Number(e.amount || 0), 0);
+}, [expensesOfSelectedDay]);
 
-  const selectedDayTotal = useMemo(() => {
-  const expensesOfSelectedCategory = useMemo(() => {
+const expensesOfSelectedCategory = useMemo(() => {
   if (!selectedCategoryName) return [];
 
   return expensesFiltered
     .filter(
       (e) =>
-        (categoriesById[e.categoryId]?.name || e.categoryId) ===
-        selectedCategoryName
+        (categoriesById[e.categoryId]?.name || e.categoryId) === selectedCategoryName
     )
     .sort((a, b) => Number(b.amount) - Number(a.amount));
 }, [expensesFiltered, selectedCategoryName, categoriesById]);
@@ -604,93 +605,7 @@ const selectedCategoryTotal = useMemo(() => {
     (acc, e) => acc + Number(e.amount || 0),
     0
   );
-}, [expensesOfSelectedCategory]);  
-    return expensesOfSelectedDay.reduce((acc, e) => acc + Number(e.amount || 0), 0);
-  }, [expensesOfSelectedDay]);
-
-  {selectedCategoryName && (
-  <section className="bg-white rounded-2xl shadow p-4">
-    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 mb-3">
-      <div>
-        <h3 className="font-semibold">
-          Detalle categoría: {selectedCategoryName}
-        </h3>
-        <p className="text-sm text-slate-500">
-          {expensesOfSelectedCategory.length} gasto(s) · Total: {fmt(selectedCategoryTotal)}
-        </p>
-      </div>
-
-      <button
-        type="button"
-        onClick={() => setSelectedCategoryName(null)}
-        className="px-3 py-2 rounded-xl bg-white border"
-      >
-        Cerrar detalle
-      </button>
-    </div>
-
-    {expensesOfSelectedCategory.length === 0 ? (
-      <div className="text-sm text-slate-500">
-        No hay gastos para esa categoría con los filtros actuales.
-      </div>
-    ) : (
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[700px]">
-          <thead className="bg-slate-100">
-            <tr>
-              <th className="text-left p-2">ID gasto</th>
-              <th className="text-left p-2">Fecha</th>
-              <th className="text-left p-2">Categoría</th>
-              <th className="text-right p-2">Monto</th>
-              <th className="text-left p-2">Nota</th>
-              <th className="text-right p-2">Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {expensesOfSelectedCategory.map((e) => (
-              <tr key={e.id} className="border-t">
-                <td className="p-2 whitespace-nowrap font-mono">
-                  {getDisplayExpenseId(e)}
-                </td>
-                <td className="p-2 whitespace-nowrap">{e.date}</td>
-                <td className="p-2">
-                  {categoriesById[e.categoryId]?.name || e.categoryId}
-                </td>
-                <td className="p-2 text-right font-medium">
-                  {fmt(e.amount)}
-                </td>
-                <td className="p-2">{e.note}</td>
-                <td className="p-2 text-right">
-                  <div className="flex justify-end gap-3 whitespace-nowrap">
-                    <button
-                      onClick={() => editExpense(e)}
-                      className="text-slate-700 hover:underline"
-                    >
-                      Editar
-                    </button>
-                    <button
-                      onClick={() => duplicateExpense(e)}
-                      className="text-blue-700 hover:underline"
-                    >
-                      Duplicar
-                    </button>
-                    <button
-                      onClick={() => removeExpense(e.id)}
-                      className="text-red-600 hover:underline"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    )}
-  </section>
-)}
-
+}, [expensesOfSelectedCategory]);
   function resetForm(options = {}) {
     const {
       preserveLastDateAndCategory = false,
@@ -1232,6 +1147,44 @@ const selectedCategoryTotal = useMemo(() => {
                     Día seleccionado: {selectedDay}
                   </span>
                 )}
+{Number.isFinite(selectedDay) && (
+  ...detalle por día...
+)}
+
+{/* 👇 ACÁ PEGÁS EL BLOQUE NUEVO */}
+{selectedCategoryName && (
+  <section className="bg-white rounded-2xl shadow p-4">
+    <div className="flex justify-between mb-3">
+      <div>
+        <h3 className="font-semibold">
+          Detalle categoría: {selectedCategoryName}
+        </h3>
+        <p className="text-sm text-slate-500">
+          {expensesOfSelectedCategory.length} gasto(s) · Total: {fmt(selectedCategoryTotal)}
+        </p>
+      </div>
+
+      <button
+        onClick={() => setSelectedCategoryName(null)}
+        className="px-3 py-2 rounded-xl bg-white border"
+      >
+        Cerrar
+      </button>
+    </div>
+
+    <table className="w-full text-sm">
+      <tbody>
+        {expensesOfSelectedCategory.map((e) => (
+          <tr key={e.id}>
+            <td>{e.date}</td>
+            <td>{e.note}</td>
+            <td>{fmt(e.amount)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </section>
+)}
                 <button
                   type="button"
                   onClick={() => setSelectedDay(null)}
